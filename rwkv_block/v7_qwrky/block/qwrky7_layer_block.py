@@ -1,4 +1,5 @@
 import torch
+from torch import nn
 from typing import Union, Tuple
 
 from ...v7_goose.block.rwkv7_layer_block import RWKV7LayerBlock
@@ -6,9 +7,28 @@ from ...v7_goose.block.rwkv7_block_config_map import RWKV7BlockConfigMap
 from .qwrky7_time_mix import Qwrky7TimeMix
 
 class Qwrky7LayerBlock(RWKV7LayerBlock):
-    def __init__(self, configMap: Union[RWKV7BlockConfigMap, any]):
-        self.att = Qwrky7TimeMix(configMap)
+    def __init__(
+            self, 
+            configMap: Union[RWKV7BlockConfigMap, any],
+            in_att:nn.Module=None,
+            in_ffn:nn.Module=None,
+        ):
+
+        if in_att is not None:
+            self.att = in_att
+        else:
+            self.att = Qwrky7TimeMix(configMap)
+
+        if in_ffn is not None:
+            self.ffn = in_ffn
+        
+        # Qwrky7, ln0 is not used
+        self.ln0 = nn.Identity()
+
         super().__init__(configMap)
+
+        # Assert ln0 is still an identity
+        assert isinstance(self.ln0, nn.Identity), "ln0 should be an identity layer"
 
     
     def forward(
@@ -16,7 +36,7 @@ class Qwrky7LayerBlock(RWKV7LayerBlock):
         last_state: tuple[torch.Tensor,torch.Tensor,torch.Tensor], 
         v_first:torch.Tensor,
         position_embeddings: Tuple[torch.Tensor, torch.Tensor],
-        ) -> tuple[torch.Tensor,tuple[torch.Tensor,torch.Tensor,torch.Tensor],torch.Tensor]:
+    ) -> tuple[torch.Tensor,tuple[torch.Tensor,torch.Tensor,torch.Tensor],torch.Tensor]:
         '''
         Forward the block given the input tokens and the last state, and position embeddings
         Last state is a tuple of the following

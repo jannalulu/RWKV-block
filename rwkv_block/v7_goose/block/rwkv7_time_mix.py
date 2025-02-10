@@ -211,7 +211,7 @@ class RWKV7TimeMix(torch.nn.Module):
         self.output.reset_parameters()
         self.ln_x.reset_parameters()
 
-    def forward(self, x:Tensor, shift_state_in:Tensor, wkv_state_in:Tensor, v_first_val:Tensor) -> tuple[Tensor,Tensor,Tensor,Tensor]:
+    def forward(self, x:Tensor, shift_state_in:Tensor=None, wkv_state_in:Tensor=None, v_first_val:Tensor=None) -> tuple[Tensor,Tensor,Tensor,Tensor]:
         '''
         forwarding time mix given the model weights and the input tokens and states.
         
@@ -221,7 +221,6 @@ class RWKV7TimeMix(torch.nn.Module):
             [batch_size, state_size] ## Token Shift state,
             [batch_size, n_head, head_size, head_size] ## WKV state
         - Incoming v_first_val of shape [batch_size, seq_len, embedding_size]
-        
         
         Returns a pair 
         - output embedding of shape [batch_size, seq_len, embedding_size]
@@ -241,6 +240,10 @@ class RWKV7TimeMix(torch.nn.Module):
             wkv_state_in = torch.zeros(BATCH_SIZE,N_HEAD,HEAD_SIZE,HEAD_SIZE, dtype=torch.float,device=w.device)
         else:
             wkv_state_in = wkv_state_in.clone()
+
+        # Ensure shift_state_in is initialized
+        if shift_state_in is None:
+            shift_state_in = torch.zeros(BATCH_SIZE, IN_EMB_SIZE, dtype=x.dtype, device=x.device)
 
         ##########
         ## x070
@@ -267,7 +270,7 @@ class RWKV7TimeMix(torch.nn.Module):
         kk = F.normalize((k * self.k_k).view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1), dim=-1, p=2.0).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
         k = k * (1 + (iclr-1) * self.k_a)
 
-        if self.layer_id == 0:
+        if self.layer_id == 0 or v_first_val is None:
             v_first_val = v # store the v of the first layer
         else:
             v = v + (v_first_val - v) * torch.sigmoid(self.v0 + (xv @ self.v1) @ self.v2) # add value residual

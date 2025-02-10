@@ -63,7 +63,7 @@ class RWKV7ChannelMix(torch.nn.Module):
         self.key.reset_parameters()
         self.value.reset_parameters()
 
-    def forward(self, x: torch.Tensor, last_state: torch.Tensor) -> tuple[torch.Tensor,torch.Tensor]:
+    def forward(self, x: torch.Tensor, last_state: torch.Tensor=None) -> tuple[torch.Tensor,torch.Tensor]:
         '''
         Forwarding channel mix given the input tokens and states.
         
@@ -75,7 +75,11 @@ class RWKV7ChannelMix(torch.nn.Module):
         - Output embedding of shape [batch_size, seq_len, embedding_size]
         - Output channel mix, shift state of shape [batch_size, state_size]
         '''
-        # last_state = last_state.to(self.key.weight.device)
+
+        if last_state is None:
+            last_state = torch.zeros(x.shape[0], x.shape[2], device=x.device, dtype=x.dtype)
+        # else:
+        #     last_state = last_state.to(self.key.weight.device)
 
         ##########
         ## x070

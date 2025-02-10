@@ -17,8 +17,9 @@ class Qwrky7TimeMix(RWKV7TimeMix):
 
     def forward(
         self, 
-        x:Tensor, shift_state_in:Tensor, wkv_state_in:Tensor, v_first_val:Tensor,
-        position_embeddings: Tuple[torch.Tensor, torch.Tensor],
+        x:Tensor, 
+        shift_state_in:Tensor = None, wkv_state_in:Tensor = None, v_first_val:Tensor = None,
+        position_embeddings: Tuple[torch.Tensor, torch.Tensor] = None,
     ) -> tuple[Tensor,Tensor,Tensor,Tensor]:
         # Apply qwen2 rotary embeddings
         # see: https://github.com/huggingface/transformers/blob/6b550462139655d488d4c663086a63e98713c6b9/src/transformers/models/qwen2/modeling_qwen2.py#L68
