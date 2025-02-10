@@ -53,7 +53,7 @@ class RWKV7LayerBlock(torch.nn.Module):
         '''
         Reset the parameters of the block, to an initial state used for training a model from scratch
         '''
-        configMap = self.configMap
+        # configMap = self.configMap
 
         # # Get required props
         # hidden_size = configMap.hidden_size

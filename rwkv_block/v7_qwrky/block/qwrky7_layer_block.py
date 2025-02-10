@@ -5,35 +5,65 @@ from typing import Union, Tuple
 from ...v7_goose.block.rwkv7_layer_block import RWKV7LayerBlock
 from ...v7_goose.block.rwkv7_block_config_map import RWKV7BlockConfigMap
 from .qwrky7_time_mix import Qwrky7TimeMix
+from .qwrky7_block_config_map import Qwrky7BlockConfigMap
 
-class Qwrky7LayerBlock(RWKV7LayerBlock):
+from transformers.models.qwen2.modeling_qwen2 import Qwen2RMSNorm, Qwen2MLP
+
+class Qwrky7LayerBlock(torch.nn.Module):
     def __init__(
             self, 
-            configMap: Union[RWKV7BlockConfigMap, any],
-            in_att:nn.Module=None,
-            in_ffn:nn.Module=None,
+            configMap: Union[Qwrky7BlockConfigMap, RWKV7BlockConfigMap, any]
         ):
 
-        if in_att is not None:
-            self.att = in_att
+        # The configMap to use
+        configMap = Qwrky7BlockConfigMap.normalize(configMap)
+        self.configMap = configMap
+
+        # Get required props
+        hidden_size = configMap.hidden_size
+        device = configMap.get_device(None)
+        rms_norm_eps = configMap.rms_norm_eps
+
+        # Setup the modules
+        self.input_layernorm = Qwen2RMSNorm(hidden_size, rms_norm_eps).to(device)
+        self.self_attn = Qwrky7TimeMix(configMap)
+
+        self.post_attention_layernorm = Qwen2RMSNorm(hidden_size, eps=rms_norm_eps).to(device)
+        self.mlp = Qwen2MLP({
+            "hidden_size": hidden_size,
+            "intermediate_size": configMap.get_hidden_size_ffn()
+        }).to(device)
+
+        # Setup droupout at block level
+        dropout_rate = configMap.dropout_rate
+        if dropout_rate > 0.0:            
+            self.drop0 = nn.Dropout(p = dropout_rate,device=device)
+            self.drop1 = nn.Dropout(p = dropout_rate,device=device)
         else:
-            self.att = Qwrky7TimeMix(configMap)
-
-        if in_ffn is not None:
-            self.ffn = in_ffn
-        
-        # Qwrky7, ln0 is not used
-        self.ln0 = nn.Identity()
-
-        super().__init__(configMap)
-
-        # Assert ln0 is still an identity
-        assert isinstance(self.ln0, nn.Identity), "ln0 should be an identity layer"
-
+            self.drop0 = nn.Identity(device=device)
+            self.drop1 = nn.Identity(device=device)
     
+    def reset_parameters(self):
+        '''
+        Reset the parameters of the block, to an initial state used for training a model from scratch
+        '''
+        # Call the sub blocks reset_parameters
+        self.self_attn.reset_parameters()
+
+        # Reset the layernorms
+        self.input_layernorm.weight.data.fill_(1.0)
+        self.post_attention_layernorm.weight.data.fill_(1.0)
+        
+        # Update the linear layers
+        self.mlp.gate_proj.reset_parameters()
+        self.mlp.up_proj.reset_parameters()
+        self.mlp.down_proj.reset_parameters()
+
+
     def forward(
-        self, x:torch.Tensor,
-        last_state: tuple[torch.Tensor,torch.Tensor,torch.Tensor], 
+        self, 
+        x:torch.Tensor, # hidden state
+        last_state: tuple[torch.Tensor,torch.Tensor], 
         v_first:torch.Tensor,
         position_embeddings: Tuple[torch.Tensor, torch.Tensor],
     ) -> tuple[torch.Tensor,tuple[torch.Tensor,torch.Tensor,torch.Tensor],torch.Tensor]:
@@ -42,21 +72,16 @@ class Qwrky7LayerBlock(RWKV7LayerBlock):
         Last state is a tuple of the following
         - time mix shift state
         - time mix wkv state
-        - channel mix shift state
 
         Returns a pair of the output embedding, v_first and the next state
         '''
 
-        # # Ensure everything is in the right device
-        # x = x.to(self.ln1.weight.device)
-        # last_state = [ s.to(self.ln1.weight.device) for s in last_state ]
-
-        # Note, that this only applies for layer 0
-        ln0_out = self.ln0(x)
+        # Ensure everything is in the right device
+        x = x.to(self.input_layernorm.weight.device)
 
         # Forward the time mix, with position embeddings
         att_out, tmix_shift, tmix_wkv, v_first = self.att(
-            self.ln1(ln0_out),
+            self.input_layernorm(x),
             last_state[0], # tmix_shift,
             last_state[1], # tmix_wkv
             v_first,
@@ -64,16 +89,16 @@ class Qwrky7LayerBlock(RWKV7LayerBlock):
         )
 
         # x = x + att_out
-        x = self.drop0(ln0_out + att_out)
+        x = self.drop0(x + att_out)
 
-        ffn_out, ffn_state = self.ffn(
-            self.ln2(x),
+        mlp_out, mlp_state = self.mlp(
+            self.post_attention_layernorm(x),
             last_state[2] # cmix_shift,
         )
 
         # x = x + ffn_out
-        x = self.drop1(x + ffn_out)
+        x = self.drop1(x + mlp_out)
 
         # Return the output
-        return x, (tmix_shift, tmix_wkv, ffn_state), v_first
+        return x, (tmix_shift, tmix_wkv), v_first
     
