@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 from torch import Tensor
-from typing import Union
+from typing import Optional, Union
 from torch.nn import functional as F
 
 from .rwkv7_block_config_map import RWKV7BlockConfigMap
@@ -38,11 +38,8 @@ class RWKV7LayerBlock(torch.nn.Module):
         else:
             self.ln0 = nn.Identity(device=device)
 
-        # Setup the time and channel mix
-        if self.att is None:
-            self.att = RWKV7TimeMix(configMap)
-        if self.ffn is None:
-            self.ffn = RWKV7ChannelMix(configMap)
+        self.att = RWKV7TimeMix(configMap)
+        self.ffn = RWKV7ChannelMix(configMap)
 
         # Setup droupout at block level
         if dropout_rate > 0.0:            
