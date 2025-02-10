@@ -274,7 +274,23 @@ class RWKV7TimeMix(torch.nn.Module):
             v_first_val = v # store the v of the first layer
         else:
             v = v + (v_first_val - v) * torch.sigmoid(self.v0 + (xv @ self.v1) @ self.v2) # add value residual
+        
+        ##########
+        # Apply the time mix backend
+        xx, wkv_state_out = self._run_tmix_backend(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in, self.w0)
+        ##########
 
+        xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
+        xx = xx + ((r.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*k.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*self.r_k).sum(dim=-1, keepdim=True) * v.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)).view(BATCH_SIZE,SEQ_LEN,IN_EMB_SIZE)
+        xx = self.output(xx * g)
+
+        return xx, shift_state_out, wkv_state_out, v_first_val
+    
+    def _run_tmix_backend(
+        self,
+        r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in,
+        w0 = None
+    ):
         tmix_backend = self.tmix_backend.lower()
         if tmix_backend == "auto":
             if triton is None or self.receptance.weight.device.type == "cpu":
@@ -282,67 +298,8 @@ class RWKV7TimeMix(torch.nn.Module):
             else:
                 tmix_backend = "cuda"
 
-        if tmix_backend == "pytorch_ref" or tmix_backend == "pytorch_ref_ori":
-            # Pure pytorch mode for rwkv attention
-            from .kernel.rwkv7_attn_pytorch import rwkv7_attn_pytorch_ref
-            # Reference minimal compilation version
-            w = torch.exp(-0.606531 * torch.sigmoid((self.w0 + w).float())) # 0.606531 = exp(-0.5)
-            xx, wkv_state_out = rwkv7_attn_pytorch_ref(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
-        elif tmix_backend == "pytorch_ref_fp32":
-            # Pure pytorch mode for rwkv attention
-            from .kernel.rwkv7_attn_pytorch import rwkv7_attn_pytorch_ref_fp32
-            # Modified to follow the same logic as "cuda" version
-            # w = torch.exp(-0.606531 * torch.sigmoid((self.w0 + w).float())) # 0.606531 = exp(-0.5)
-            w = -F.softplus(-(self.w0 + w)) - 0.5
-            xx, wkv_state_out = rwkv7_attn_pytorch_ref_fp32(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
-        elif tmix_backend == "pytorch":
-            # Pure pytorch mode for rwkv attention
-            from .kernel.rwkv7_attn_pytorch import rwkv7_attn_pytorch
-            # Tweaked pytorch compile varient
-            w = torch.exp(-0.606531 * torch.sigmoid((self.w0 + w).float())) # 0.606531 = exp(-0.5)
-            xx, wkv_state_out = rwkv7_attn_pytorch(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
-        elif tmix_backend in ["triton", "triton_smallhead", "triton_small"]:
-            if triton is None:
-                raise ValueError("Triton not available, unable to load triton kernel")
-            from .kernel.rwkv7_attn_triton import rwkv7_attn_triton
-            w = -F.softplus(-(self.w0 + w)) - 0.5
-            xx, wkv_state_out = rwkv7_attn_triton(r, w, k, v, kk, iclr, s0=wkv_state_in)
-        elif tmix_backend in ["triton_bighead", "triton_big"]:
-            if triton is None:
-                raise ValueError("Triton not available, unable to load triton kernel")
-            from .kernel.rwkv7_attn_triton import rwkv7_attn_triton_bighead
-            w = -F.softplus(-(self.w0 + w)) - 0.5
-            xx, wkv_state_out = rwkv7_attn_triton_bighead(r, w, k, v, kk, iclr, s0=wkv_state_in)
-        elif tmix_backend == "cuda_ref":
-            # Cuda based method for rwkv attention
-            from .kernel.rwkv7_attn_cuda import rwkv7_attn_cuda_ref
-            # Reference cuda version (no state output)
-            w = -F.softplus(-(self.w0 + w)) - 0.5
-            xx, wkv_state_out = rwkv7_attn_cuda_ref(r, w, k, v, kk, iclr, s0=wkv_state_in)
-        elif tmix_backend == "cuda":
-            # Cuda based method for rwkv attention
-            from .kernel.rwkv7_attn_cuda import rwkv7_attn_cuda
-            # Modified cuda version (with state output)
-            w = -F.softplus(-(self.w0 + w)) - 0.5
-            xx, wkv_state_out = rwkv7_attn_cuda(r, w, k, v, kk, iclr, s0=wkv_state_in)
-        elif tmix_backend == "fla":
-            # FLA based method for rwkv attention
-            from .kernel.rwkv7_attn_fla import rwkv7_attn_fla
-            # FLA runs with the softplus w
-            w = -F.softplus(-(self.w0 + w)) - 0.5
-            xx, wkv_state_out = rwkv7_attn_fla(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
-        elif tmix_backend == "fla_fused" or tmix_backend == "fused_fla":
-            # FLA based method for rwkv attention
-            from .kernel.rwkv7_attn_fla import rwkv7_attn_fused_reccurent_fla
-            # FLA runs with the softplus w
-            w = -F.softplus(-(self.w0 + w)) - 0.5
-            xx, wkv_state_out = rwkv7_attn_fused_reccurent_fla(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
-        else:
-            raise ValueError(f"Unknown tmix_backend: {tmix_backend}")
-
-        # wkv_state_in normalization of type
-        if wkv_state_in is not None:
-            wkv_state_out = wkv_state_out.to(wkv_state_in.dtype)
+        if w0 is None:
+            w0 = self.w0
 
         ######## cuda-based method 
         # wkv_state_out = wkv_state_in.clone()
@@ -350,11 +307,64 @@ class RWKV7TimeMix(torch.nn.Module):
         # xx = RWKV7_OP(wkv_state_out, r, w, k, v, -kk, kk*a)
         ######## cuda-based method 
 
-        xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
-        xx = xx + ((r.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*k.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*self.r_k).sum(dim=-1, keepdim=True) * v.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)).view(BATCH_SIZE,SEQ_LEN,IN_EMB_SIZE)
-        xx = self.output(xx * g)
-
-        return xx, shift_state_out, wkv_state_out, v_first_val
+        if tmix_backend == "pytorch_ref" or tmix_backend == "pytorch_ref_ori":
+            # Pure pytorch mode for rwkv attention
+            from .kernel.rwkv7_attn_pytorch import rwkv7_attn_pytorch_ref
+            # Reference minimal compilation version
+            w = torch.exp(-0.606531 * torch.sigmoid(w0 + w.float())) # 0.606531 = exp(-0.5)
+            xx, wkv_state_out = rwkv7_attn_pytorch_ref(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
+        elif tmix_backend == "pytorch_ref_fp32":
+            # Pure pytorch mode for rwkv attention
+            from .kernel.rwkv7_attn_pytorch import rwkv7_attn_pytorch_ref_fp32
+            # Modified to follow the same logic as "cuda" version
+            # w = torch.exp(-0.606531 * torch.sigmoid(w0 + w.float())) # 0.606531 = exp(-0.5)
+            w = -F.softplus(-w0 + w) - 0.5
+            xx, wkv_state_out = rwkv7_attn_pytorch_ref_fp32(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
+        elif tmix_backend == "pytorch":
+            # Pure pytorch mode for rwkv attention
+            from .kernel.rwkv7_attn_pytorch import rwkv7_attn_pytorch
+            # Tweaked pytorch compile varient
+            w = torch.exp(-0.606531 * torch.sigmoid(w0 + w.float())) # 0.606531 = exp(-0.5)
+            xx, wkv_state_out = rwkv7_attn_pytorch(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
+        elif tmix_backend in ["triton", "triton_smallhead", "triton_small"]:
+            if triton is None:
+                raise ValueError("Triton not available, unable to load triton kernel")
+            from .kernel.rwkv7_attn_triton import rwkv7_attn_triton
+            w = -F.softplus(-w0 + w) - 0.5
+            xx, wkv_state_out = rwkv7_attn_triton(r, w, k, v, kk, iclr, s0=wkv_state_in)
+        elif tmix_backend in ["triton_bighead", "triton_big"]:
+            if triton is None:
+                raise ValueError("Triton not available, unable to load triton kernel")
+            from .kernel.rwkv7_attn_triton import rwkv7_attn_triton_bighead
+            w = -F.softplus(-w0 + w) - 0.5
+            xx, wkv_state_out = rwkv7_attn_triton_bighead(r, w, k, v, kk, iclr, s0=wkv_state_in)
+        elif tmix_backend == "cuda_ref":
+            # Cuda based method for rwkv attention
+            from .kernel.rwkv7_attn_cuda import rwkv7_attn_cuda_ref
+            # Reference cuda version (no state output)
+            w = -F.softplus(-w0 + w) - 0.5
+            xx, wkv_state_out = rwkv7_attn_cuda_ref(r, w, k, v, kk, iclr, s0=wkv_state_in)
+        elif tmix_backend == "cuda":
+            # Cuda based method for rwkv attention
+            from .kernel.rwkv7_attn_cuda import rwkv7_attn_cuda
+            # Modified cuda version (with state output)
+            w = -F.softplus(-w0 + w) - 0.5
+            xx, wkv_state_out = rwkv7_attn_cuda(r, w, k, v, kk, iclr, s0=wkv_state_in)
+        elif tmix_backend == "fla":
+            # FLA based method for rwkv attention
+            from .kernel.rwkv7_attn_fla import rwkv7_attn_fla
+            # FLA runs with the softplus w
+            w = -F.softplus(-w0 + w) - 0.5
+            xx, wkv_state_out = rwkv7_attn_fla(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
+        elif tmix_backend == "fla_fused" or tmix_backend == "fused_fla":
+            # FLA based method for rwkv attention
+            from .kernel.rwkv7_attn_fla import rwkv7_attn_fused_reccurent_fla
+            # FLA runs with the softplus w
+            w = -F.softplus(-w0 + w) - 0.5
+            xx, wkv_state_out = rwkv7_attn_fused_reccurent_fla(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
+        else:
+            raise ValueError(f"Unknown tmix_backend: {tmix_backend}")
+        return xx, wkv_state_out
 
     @torch.compile(mode="default")
     def forward_with_default_compile(self, in_x:Tensor, shift_state_in:Tensor, wkv_state_in:Tensor, v_first_val_in:Tensor, out_x:Tensor, shift_state_out:Tensor, wkv_state_out:Tensor, v_first_val_out:Tensor) -> tuple[Tensor,Tensor,Tensor,Tensor]:
