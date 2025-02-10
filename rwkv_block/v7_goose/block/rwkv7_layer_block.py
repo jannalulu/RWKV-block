@@ -39,8 +39,10 @@ class RWKV7LayerBlock(torch.nn.Module):
             self.ln0 = nn.Identity(device=device)
 
         # Setup the time and channel mix
-        self.att = RWKV7TimeMix(configMap)
-        self.ffn = RWKV7ChannelMix(configMap)
+        if self.att is None:
+            self.att = RWKV7TimeMix(configMap)
+        if self.ffn is None:
+            self.ffn = RWKV7ChannelMix(configMap)
 
         # Setup droupout at block level
         if dropout_rate > 0.0:            
