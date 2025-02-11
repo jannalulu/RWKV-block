@@ -233,13 +233,13 @@ def rwkv7_attn_cuda_chunk(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
     H = HC//C
 
     # Handling the cuda kernel
-    a,b = -kk, (kk*iclr)
+    a,b = -kk, (kk.to(dtype=iclr.dtype)*iclr)
     r,w,k,v,a,b = [i.view(B,T,H,C).bfloat16().contiguous() for i in [r,w,k,v,a,b]]
 
     if s0 is None:
         s1 = torch.zeros(B,H,C,C, dtype=torch.float,device=w.device).contiguous()
     else:
-        s1 = s0.clone().contiguous()
+        s1 = s0.float().clone().contiguous()
 
     # Forward with backprop
     xx = CudaWindBackstepping.apply(s1,w,r,k,v,a,b)
