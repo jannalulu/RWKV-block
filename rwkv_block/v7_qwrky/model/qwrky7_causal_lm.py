@@ -1,0 +1,67 @@
+import torch, math
+from torch import nn
+from torch import Tensor
+from typing import Union
+
+from .qwrky7_config_map import Qwrky7ConfigMap
+from ..block.qwrky7_layer_block import Qwrky7LayerBlock
+from .qwrky7_model import Qwrky7Model
+
+class Qwrky7CausalLM(nn.Module):
+    def __init__(self, config: Union[Qwrky7ConfigMap, any]):
+        super().__init__()
+        self.config = Qwrky7ConfigMap.normalize(config)
+        self.model = Qwrky7Model(self.config)
+        self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
+
+    def load_from_model_state_dict(self, state_dict: dict, non_blocking:bool=True):
+        '''
+        Given the Full/partial qwrky model weights, loaded via `torch.load`
+        Setup the RWKV_TimeMix model weights, using the layer_id
+        '''
+        self.model.load_from_model_state_dict(state_dict, non_blocking=non_blocking)
+        self.lm_head.weight.copy_(state_dict['lm_head.weight'])
+
+    def forward(
+            self, 
+            input_ids: torch.Tensor,
+            prv_stateList:list[torch.Tensor] = None,  
+            ret_stateList:list[torch.Tensor] = None,
+            overwrite_ret_tensor:bool=False
+        ) -> torch.Tensor:
+        '''
+        Forward the layer set, given the input tokens and the last state
+        Last state is a list of time mix wkv state
+
+        Returns the output logits and the next state
+        '''
+        hidden_state, ret_stateList = self.model(input_ids, prv_stateList, ret_stateList, overwrite_ret_tensor)
+        logits = self.lm_head(hidden_state)
+        return logits, ret_stateList
+    
+    @torch.compile(mode="default")
+    def forward_with_default_compile(
+        self, 
+        idx:torch.Tensor, 
+        prv_stateList:list[torch.Tensor],
+        ret_stateList:list[torch.Tensor],
+    ) -> tuple[torch.Tensor,list[torch.Tensor]]:
+        '''
+        Compiled varient of the forward function
+        With no new tensors being created for the output
+        Useful for static memory allocation optimizations inference
+        '''
+        # Forward internally
+        return self.forward(idx, prv_stateList, ret_stateList, overwrite_ret_tensor=True)
+  
+    @torch.compile(mode="reduce-overhead")
+    def forward_with_reduce_compile(
+        self, 
+        in_idx:torch.Tensor, 
+        prv_stateList:list[torch.Tensor]
+    ) -> tuple[torch.Tensor,list[torch.Tensor]]:
+        '''
+        Compiled varient of the forward function, requires previous state to be passed
+        '''
+        return self.forward(in_idx, prv_stateList, None, overwrite_ret_tensor=False)
+

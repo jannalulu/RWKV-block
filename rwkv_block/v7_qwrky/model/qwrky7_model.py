@@ -154,6 +154,7 @@ class Qwrky7Model(nn.Module):
         self, idx:torch.Tensor, 
         prv_stateList:list[torch.Tensor] = None,  
         ret_stateList:list[torch.Tensor] = None,
+        overwrite_ret_tensor:bool=False
     ) -> tuple[torch.Tensor,list[torch.Tensor]]:
         '''
         Forward the layer set, given the input tokens and the last state
@@ -171,7 +172,7 @@ class Qwrky7Model(nn.Module):
             return self._forward_internal(idx, prv_stateList, ret_stateList, overwrite_ret_tensor=False)
 
         # Forward internally
-        return self._forward_internal(idx, prv_stateList, ret_stateList, overwrite_ret_tensor=True)
+        return self._forward_internal(idx, prv_stateList, ret_stateList, overwrite_ret_tensor=overwrite_ret_tensor)
     
     def _forward_internal_embeddings(
             self, x_hidden_state:torch.Tensor, 
