@@ -6,19 +6,27 @@ from ...v7_goose.block.rwkv7_block_config_map import RWKV7BlockConfigMap
 
 class Qwrky7BlockConfigMap(RWKV7BlockConfigMap):
 
-    # Qwen RMS Norm
+    # RMS Norm eps
     rms_norm_eps: float = 1e-6
+    # Attention QKV bias
+    attention_bias: bool = True
+    # Attention output bias
+    attention_output_bias: bool = False
 
     def __init__(
         self, 
         rms_norm_eps: float = 1e-6,
+        attention_bias: bool = True,
+        attention_output_bias: bool = False,
         **kargs
     ):
         '''
-        Config with Qwen RMS Norm
+        Config with RMS Norm eps
         And alias for hidden_size_mlp
         '''
         self.rms_norm_eps = rms_norm_eps
+        self.attention_bias = attention_bias
+        self.attention_output_bias = attention_output_bias
         super().__init__(**kargs)
 
     

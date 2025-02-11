@@ -106,6 +106,7 @@ class RWKV7TimeMix(torch.nn.Module):
         self.key = nn.Linear(hidden_size, hidden_size_att, bias=False, device=device, dtype=dtype)
         self.value = nn.Linear(hidden_size, hidden_size_att, bias=False, device=device, dtype=dtype)
         self.output = nn.Linear(hidden_size_att, hidden_size, bias=False, device=device, dtype=dtype)
+        
         self.ln_x = nn.GroupNorm(n_head, hidden_size_att, device=device, dtype=dtype, eps=(1e-5)*head_size)
         
     def reset_parameters(self):
