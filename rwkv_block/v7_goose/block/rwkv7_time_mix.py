@@ -408,4 +408,4 @@ def _run_tmix_backend(
         xx, wkv_state_out = rwkv7_attn_fused_reccurent_fla(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
     else:
         raise ValueError(f"Unknown tmix_backend: {tmix_backend}")
-    return xx.to(dtype=xx_dtype), wkv_state_out
+    return xx.to(dtype=xx_dtype), wkv_state_out.to(dtype=wkv_state_in.dtype)
