@@ -19,6 +19,8 @@ class Qwrky7BlockConfigMap(RWKV7BlockConfigMap):
 
     def __init__(
         self, 
+        num_hidden_layers: int,
+        hidden_size: int,
         rms_norm_eps: float = 1e-6,
         attention_bias: bool = True,
         attention_output_bias: bool = False,
@@ -32,7 +34,7 @@ class Qwrky7BlockConfigMap(RWKV7BlockConfigMap):
         self.rms_norm_eps = rms_norm_eps
         self.attention_bias = attention_bias
         self.attention_output_bias = attention_output_bias
-        super().__init__(head_size=head_size, **kargs)
+        super().__init__(num_hidden_layers, hidden_size, head_size=head_size, **kargs)
 
     
     def get_hidden_size_mlp(self) -> int:
