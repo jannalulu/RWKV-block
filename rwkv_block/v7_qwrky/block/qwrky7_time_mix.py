@@ -124,9 +124,6 @@ class Qwrky7TimeMix(torch.nn.Module):
         device = configMap.get_device(None)
         dtype = configMap.get_dtype('bfloat16')
 
-        # By default, hidden_size_ffn = hidden_size
-        hidden_size_att = configMap.get_hidden_size_att()
-
         # Head size settings
         head_size = self.head_size
         n_head = self.n_head
@@ -265,9 +262,9 @@ class Qwrky7TimeMix(torch.nn.Module):
         xr = xw = xk = xv = xa = xg = x
 
         r = self.q_proj(xr)
-        w = torch.tanh(xw @ self.w1) @ self.w2
-        k = self.key(xk)
-        v = self.value(xv)
+        w_lora_result = self.w0 + (torch.tanh(xw @ self.w1) @ self.w2).float()
+        k = self.k_proj(xk)
+        v = self.v_proj(xv)
         g = torch.sigmoid(xg @ self.g1) @ self.g2
         iclr = torch.sigmoid(self.a0 + (xa @ self.a1) @ self.a2) # a is "in-context learning rate"
 
@@ -285,16 +282,30 @@ class Qwrky7TimeMix(torch.nn.Module):
             # r = r.transpose(1,2).view(B,T,-1).to(v.dtype)
             # k = k.transpose(1,2).view(B,T,-1).to(v.dtype)
 
-        # # repeat k/v heads if n_kv_heads < n_heads
-        # k = k.view(B, T, -1, 1, HEAD_SIZE).expand(-1, -1, -1, self.num_key_value_groups, -1).reshape(B, T, -1)
-        # v = v.view(B, T, -1, 1, HEAD_SIZE).expand(-1, -1, -1, self.num_key_value_groups, -1).reshape(B, T, -1)
+        # repeat k/v heads if n_kv_heads < n_heads
+        k = k.view(BATCH_SIZE, SEQ_LEN, -1, 1, HEAD_SIZE).expand(-1, -1, -1, self.n_gqa_head_group, -1).reshape(BATCH_SIZE, SEQ_LEN, -1)
+        v = v.view(BATCH_SIZE, SEQ_LEN, -1, 1, HEAD_SIZE).expand(-1, -1, -1, self.n_gqa_head_group, -1).reshape(BATCH_SIZE, SEQ_LEN, -1)
+
+        ##########
+        # qwerky7
+        ##########
+        
+        # kk = F.normalize((k * self.k_k).view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1), dim=-1, p=2.0).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
+        kk = F.normalize((k * self.k_k).view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1), dim=-1, p=2.0).view(BATCH_SIZE,SEQ_LEN,-1)
+        
+        # ---
+        # Note the change to ICLR value is intentional here
+        # as a means to normalize the value without layernorm
+        # commented is the original code
+        # ---
+        # k = k * (1 + (iclr-1) * self.k_a)
+        # ---
+        iclr = 1 + (iclr-1) * self.k_a
+        k = k * iclr
 
         ##########
         # x070
         ##########
-        kk = F.normalize((k * self.k_k).view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1), dim=-1, p=2.0).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
-        k = k * (1 + (iclr-1) * self.k_a)
-
         if self.layer_id == 0 or v_first_val is None:
             v_first_val = v # store the v of the first layer
         else:
@@ -302,7 +313,7 @@ class Qwrky7TimeMix(torch.nn.Module):
         
         ##########
         # Apply the time mix backend
-        xx, wkv_state_out = self._use_tmix_backend(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
+        xx, wkv_state_out = RWKV7TimeMix._use_tmix_backend(self.tmix_backend.lower(), r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
         ##########
 
         xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
