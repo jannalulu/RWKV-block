@@ -583,8 +583,7 @@ def rwkv7_attn_triton(r,w,k,v, kk,iclr, HEAD_SIZE=64, dot_prec='fp32', s0=None):
         return rwkv7_attn_triton_chunk(r,w,k,v, kk,iclr, HEAD_SIZE, dot_prec, s0)
     if T < 16:
         return rwkv7_attn_pytorch_ref_fp32(
-            r,torch.exp(-torch.exp(w)),
-            k,v, 
+            r,w,k,v, 
             kk,iclr, 
             B, T, H, C, 
             torch.empty(B, T, HC, device=w.device, dtype=w.dtype),
@@ -604,14 +603,13 @@ def rwkv7_attn_triton(r,w,k,v, kk,iclr, HEAD_SIZE=64, dot_prec='fp32', s0=None):
     # Get the remainder
     # ---
     # remain_xx, last_sT = rwkv7_attn_pytorch_chunk(
-    #     r[:,si:],torch.exp(-torch.exp(w_fp32[:,si:])),k[:,si:],v[:,si:], kk[:,si:],iclr[:,si:], 
+    #     r[:,si:],torch.exp(-torch.exp(w[:,si:])),k[:,si:],v[:,si:], kk[:,si:],iclr[:,si:], 
     #     B, H, C, 
     #     torch.zeros(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 
     #     chunk_sT, chunk_size=chunk_remainder
     # )
     remain_xx, last_sT = rwkv7_attn_pytorch_ref_fp32(
-        r[:,si:],torch.exp(-torch.exp(w[:,si:])),
-        k[:,si:],v[:,si:], 
+        r[:,si:],w[:,si:],k[:,si:],v[:,si:], 
         kk[:,si:],iclr[:,si:], 
         B, chunk_remainder, H, C, 
         torch.empty(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 

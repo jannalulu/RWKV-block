@@ -362,7 +362,7 @@ def _run_tmix_backend(
         from .kernel.rwkv7_attn_pytorch import rwkv7_attn_pytorch_ref_fp32
         # Modified to follow the same logic as "cuda" version
         # w = torch.exp(-0.606531 * torch.sigmoid(w_lora_result)) # 0.606531 = exp(-0.5)
-        w = -F.softplus(-w_lora_result) - 0.5
+        w = -F.softplus(-w_lora_result) - 0.5 # ref_fp32, follows the cuda style (and does its own -exp * exp)
         xx, wkv_state_out = rwkv7_attn_pytorch_ref_fp32(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
     elif tmix_backend == "pytorch":
         # Pure pytorch mode for rwkv attention
