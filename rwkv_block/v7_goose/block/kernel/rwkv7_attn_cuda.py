@@ -14,6 +14,8 @@ def load_ref_wkv_cuda_kernel(CHUNK_LEN = 16, HEAD_SIZE = 64):
 
     # Check if the load_name is already loaded
     if load_name in torch.ops:
+        if torch.ops.wind_backstepping._head_size != HEAD_SIZE:
+            raise ValueError(f"Loaded kernel has different head size {torch.ops.wind_backstepping._head_size} than expected {HEAD_SIZE} - we currently do not support multiple head sizes in the same process")
         return torch.ops.wind_backstepping
 
     # Logging of warning usage for reference implementation
@@ -37,6 +39,9 @@ def load_ref_wkv_cuda_kernel(CHUNK_LEN = 16, HEAD_SIZE = 64):
         print("[WARNING] Failed to load the kernel, trying again (sometimes the compiler has wierd race condition)...")
         time.sleep(2) # Somehow this works, with minor compilation error, that passes on subsequent reruns
         load(name=load_name, sources=[f'{this_file_path}/cuda/{load_file}_cuda.cu', f'{this_file_path}/cuda/{load_file}_op.cpp'], is_python_module=False, verbose=True, extra_cuda_cflags=flags)
+
+    # Save the head size (for error checking)
+    torch.ops.wind_backstepping._head_size = HEAD_SIZE
 
     # Return the loaded kernel
     return torch.ops.wind_backstepping
@@ -108,6 +113,8 @@ def load_wkv_cuda_kernel(CHUNK_LEN = 16, HEAD_SIZE = 64):
 
     # Check if the load_name is already loaded
     if load_name in torch.ops:
+        if torch.ops.state_wind_backstepping._head_size != HEAD_SIZE:
+            raise ValueError(f"Loaded kernel has different head size {torch.ops.state_wind_backstepping._head_size} than expected {HEAD_SIZE} - we currently do not support multiple head sizes in the same process")
         return torch.ops.state_wind_backstepping
     
     # Get the this script file path, to cmpute the cuda path
@@ -122,6 +129,9 @@ def load_wkv_cuda_kernel(CHUNK_LEN = 16, HEAD_SIZE = 64):
         print("[WARNING] Failed to load the kernel, trying again (sometimes the compiler has wierd race condition)...")
         time.sleep(2) # Somehow this works, with minor compilation error, that passes on subsequent reruns
         load(name=load_name, sources=[f'{this_file_path}/cuda/{load_file}_cuda.cu', f'{this_file_path}/cuda/{load_file}_op.cpp'], is_python_module=False, verbose=True, extra_cuda_cflags=flags)
+
+    # Save the head size (for error checking)
+    torch.ops.state_wind_backstepping._head_size = HEAD_SIZE
 
     # Return the loaded kernel
     return torch.ops.state_wind_backstepping
@@ -161,7 +171,7 @@ class CudaWindBackstepping(torch.autograd.Function):
 @torch.compiler.disable()
 def rwkv7_attn_cuda(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
     # Preload the kernel
-    load_wkv_cuda_kernel()
+    load_wkv_cuda_kernel(HEAD_SIZE=HEAD_SIZE)
 
     # Get the shape
     B,T,HC = w.shape
@@ -224,7 +234,7 @@ def rwkv7_attn_cuda_chunk(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
 
     # Handling the cuda kernel
     a,b = -kk, (kk*iclr)
-    r,w,k,v,a,b = [i.view(B,T,-1,C).bfloat16().contiguous() for i in [r,w,k,v,a,b]]
+    r,w,k,v,a,b = [i.view(B,T,H,C).bfloat16().contiguous() for i in [r,w,k,v,a,b]]
 
     if s0 is None:
         s1 = torch.zeros(B,H,C,C, dtype=torch.float,device=w.device).contiguous()

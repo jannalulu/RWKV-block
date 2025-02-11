@@ -329,25 +329,25 @@ class RWKV7TimeMix(torch.nn.Module):
                 raise ValueError("Triton not available, unable to load triton kernel")
             from .kernel.rwkv7_attn_triton import rwkv7_attn_triton
             w = -F.softplus(-w_lora_result) - 0.5
-            xx, wkv_state_out = rwkv7_attn_triton(r, w, k, v, kk, iclr, s0=wkv_state_in)
+            xx, wkv_state_out = rwkv7_attn_triton(r, w, k, v, kk, iclr, s0=wkv_state_in, HEAD_SIZE=HEAD_SIZE)
         elif tmix_backend in ["triton_bighead", "triton_big"]:
             if triton is None:
                 raise ValueError("Triton not available, unable to load triton kernel")
             from .kernel.rwkv7_attn_triton import rwkv7_attn_triton_bighead
             w = -F.softplus(-w_lora_result) - 0.5
-            xx, wkv_state_out = rwkv7_attn_triton_bighead(r, w, k, v, kk, iclr, s0=wkv_state_in)
+            xx, wkv_state_out = rwkv7_attn_triton_bighead(r, w, k, v, kk, iclr, s0=wkv_state_in, HEAD_SIZE=HEAD_SIZE)
         elif tmix_backend == "cuda_ref":
             # Cuda based method for rwkv attention
             from .kernel.rwkv7_attn_cuda import rwkv7_attn_cuda_ref
             # Reference cuda version (no state output)
             w = -F.softplus(-w_lora_result) - 0.5
-            xx, wkv_state_out = rwkv7_attn_cuda_ref(r, w, k, v, kk, iclr, s0=wkv_state_in)
+            xx, wkv_state_out = rwkv7_attn_cuda_ref(r, w, k, v, kk, iclr, s0=wkv_state_in, HEAD_SIZE=HEAD_SIZE)
         elif tmix_backend == "cuda":
             # Cuda based method for rwkv attention
             from .kernel.rwkv7_attn_cuda import rwkv7_attn_cuda
             # Modified cuda version (with state output)
             w = -F.softplus(-w_lora_result) - 0.5
-            xx, wkv_state_out = rwkv7_attn_cuda(r, w, k, v, kk, iclr, s0=wkv_state_in)
+            xx, wkv_state_out = rwkv7_attn_cuda(r, w, k, v, kk, iclr, s0=wkv_state_in, HEAD_SIZE=HEAD_SIZE)
         elif tmix_backend == "fla":
             # FLA based method for rwkv attention
             from .kernel.rwkv7_attn_fla import rwkv7_attn_fla
