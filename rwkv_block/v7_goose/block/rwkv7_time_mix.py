@@ -278,7 +278,7 @@ class RWKV7TimeMix(torch.nn.Module):
         
         ##########
         # Apply the time mix backend
-        xx, wkv_state_out = self._run_tmix_backend(self.tmix_backend.lower(), r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in, self.w0)
+        xx, wkv_state_out = self._run_tmix_backend(self.tmix_backend.lower(), r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
         ##########
 
         xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
@@ -293,10 +293,11 @@ class RWKV7TimeMix(torch.nn.Module):
         r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in
     ):
         if tmix_backend == "auto":
-            if triton is None or r.weight.device.type == "cpu":
+            if triton is None or r.device.type == "cpu":
                 tmix_backend = "pytorch"
             else:
                 tmix_backend = "cuda"
+        xx_dtype = xx.dtype
 
         ######## cuda-based method 
         # wkv_state_out = wkv_state_in.clone()
@@ -361,7 +362,7 @@ class RWKV7TimeMix(torch.nn.Module):
             xx, wkv_state_out = rwkv7_attn_fused_reccurent_fla(r, w, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in) 
         else:
             raise ValueError(f"Unknown tmix_backend: {tmix_backend}")
-        return xx, wkv_state_out
+        return xx.to(dtype=xx_dtype), wkv_state_out
 
     @torch.compile(mode="default")
     def forward_with_default_compile(self, in_x:Tensor, shift_state_in:Tensor, wkv_state_in:Tensor, v_first_val_in:Tensor, out_x:Tensor, shift_state_out:Tensor, wkv_state_out:Tensor, v_first_val_out:Tensor) -> tuple[Tensor,Tensor,Tensor,Tensor]:

@@ -561,7 +561,7 @@ class TritonBigheadRWKV7(th.autograd.Function):
 # Start of pytorch code
 ####################################################################################################
 
-from .rwkv7_attn_pytorch import rwkv7_attn_pytorch_chunk
+from .rwkv7_attn_pytorch import rwkv7_attn_pytorch_chunk, rwkv7_attn_pytorch_ref_fp32
 
 # -------------------------
 # Pytorch "smallhead" code
@@ -593,11 +593,17 @@ def rwkv7_attn_triton(r,w,k,v, kk,iclr, HEAD_SIZE=64, dot_prec='fp32', s0=None):
     )
 
     # Get the remainder
-    remain_xx, last_sT = rwkv7_attn_pytorch_chunk(
+    remain_xx, last_sT = rwkv7_attn_pytorch_ref_fp32(
         r[:,si:],torch.exp(-torch.exp(w[:,si:])),k[:,si:],v[:,si:], kk[:,si:],iclr[:,si:], 
-        B, H, C, torch.zeros(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 
-        chunk_sT, chunk_size=chunk_remainder
+        B, chunk_remainder, H, C, 
+        torch.zeros(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), chunk_sT
     )
+    # remain_xx, last_sT = rwkv7_attn_pytorch_chunk(
+    #     r[:,si:],torch.exp(-torch.exp(w_fp32[:,si:])),k[:,si:],v[:,si:], kk[:,si:],iclr[:,si:], 
+    #     B, H, C, 
+    #     torch.zeros(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 
+    #     chunk_sT, chunk_size=chunk_remainder
+    # )
 
     # Concatenate and return results
     return torch.cat([chunk_xx.to(dtype=w.dtype), remain_xx.to(dtype=w.dtype)], dim=1), last_sT.to(dtype=s0.dtype)

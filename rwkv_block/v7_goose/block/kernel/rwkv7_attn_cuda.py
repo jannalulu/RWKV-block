@@ -1,5 +1,5 @@
 import torch, os, time
-from .rwkv7_attn_pytorch import rwkv7_attn_pytorch_chunk
+from .rwkv7_attn_pytorch import rwkv7_attn_pytorch_chunk, rwkv7_attn_pytorch_ref_fp32
 
 ####################################################################################################
 # Stateless reference implementation
@@ -177,9 +177,13 @@ def rwkv7_attn_cuda(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
     s0 = torch.zeros(B,H,C,C, dtype=torch.float,device=w.device) if s0 is None else s0
     sT = s0.to(dtype=torch.float)
 
+    # Reshape the inputs (if needed)
+    w_fp32 = w.float()
+    # r,k,v,kk,iclr = [i.view(B,T,-1) for i in [r,k,v,kk,iclr]]
+
     # Optimize the call, if chunk is multiple of 16
     if chunk_remainder == 0:
-        chunk_xx, chunk_sT = rwkv7_attn_cuda_chunk(r,w,k,v, kk,iclr, HEAD_SIZE, sT)
+        chunk_xx, chunk_sT = rwkv7_attn_cuda_chunk(r,w_fp32,k,v, kk,iclr, HEAD_SIZE, sT)
         return chunk_xx, chunk_sT.to(dtype=s0.dtype)
 
     # Compute the number of chunks
@@ -188,17 +192,22 @@ def rwkv7_attn_cuda(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
 
     # Get the chunked output
     chunk_xx, chunk_sT = rwkv7_attn_cuda_chunk(
-        r[:,:si],w[:,:si],k[:,:si],v[:,:si], kk[:,:si],iclr[:,:si],
+        r[:,:si],w_fp32[:,:si],k[:,:si],v[:,:si], kk[:,:si],iclr[:,:si],
         HEAD_SIZE, s0
     )
 
     # Get the remainder
-    remain_xx, last_sT = rwkv7_attn_pytorch_chunk(
-        r[:,si:],torch.exp(-torch.exp(w[:,si:])),k[:,si:],v[:,si:], kk[:,si:],iclr[:,si:], 
-        B, H, C, 
-        torch.zeros(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 
-        chunk_sT, chunk_size=chunk_remainder
+    remain_xx, last_sT = rwkv7_attn_pytorch_ref_fp32(
+        r[:,si:],torch.exp(-torch.exp(w_fp32[:,si:])),k[:,si:],v[:,si:], kk[:,si:],iclr[:,si:], 
+        B, chunk_remainder, H, C, 
+        torch.zeros(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), chunk_sT
     )
+    # remain_xx, last_sT = rwkv7_attn_pytorch_chunk(
+    #     r[:,si:],torch.exp(-torch.exp(w_fp32[:,si:])),k[:,si:],v[:,si:], kk[:,si:],iclr[:,si:], 
+    #     B, H, C, 
+    #     torch.zeros(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 
+    #     chunk_sT, chunk_size=chunk_remainder
+    # )
 
     # Concatenate and return results
     return torch.cat([chunk_xx.to(dtype=w.dtype), remain_xx.to(dtype=w.dtype)], dim=1), last_sT.to(dtype=s0.dtype)
@@ -215,7 +224,7 @@ def rwkv7_attn_cuda_chunk(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
 
     # Handling the cuda kernel
     a,b = -kk, (kk*iclr)
-    r,w,k,v,a,b = [i.view(B,T,H,C).contiguous() for i in [r,w,k,v,a,b]]
+    r,w,k,v,a,b = [i.view(B,T,-1,C).bfloat16().contiguous() for i in [r,w,k,v,a,b]]
 
     if s0 is None:
         s1 = torch.zeros(B,H,C,C, dtype=torch.float,device=w.device).contiguous()
