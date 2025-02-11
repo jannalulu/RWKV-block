@@ -1,9 +1,11 @@
 import torch
 from torch import nn
 from typing import Union, Tuple
+from dataclasses import dataclass
 
 from ...v7_goose.block.rwkv7_block_config_map import RWKV7BlockConfigMap
 
+@dataclass
 class Qwrky7BlockConfigMap(RWKV7BlockConfigMap):
 
     # RMS Norm eps

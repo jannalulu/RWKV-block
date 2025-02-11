@@ -259,7 +259,7 @@ class Qwrky7TimeMix(torch.nn.Module):
         # xg = x + dxprev * self.x_g
         # xx = dxprev
 
-        xr = xw = xk = xv = xa = xg = x
+        xr = xw = xk = xv = xa = xg = x.to(self.q_proj.weight.dtype)
 
         r = self.q_proj(xr)
         w_lora_result = self.w0 + (torch.tanh(xw @ self.w1) @ self.w2).float()
