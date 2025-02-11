@@ -208,7 +208,7 @@ class Qwrky7TimeMix(torch.nn.Module):
         wkv_state_in:Tensor = None, 
         v_first_val:Tensor = None,
         position_embeddings: Tuple[torch.Tensor, torch.Tensor] = None,
-    ) -> tuple[Tensor,Tensor,Tensor,Tensor]:
+    ) -> tuple[Tensor,Tensor,Tensor]:
         '''
         forwarding time mix given the model weights and the input tokens and states.
         
@@ -292,7 +292,7 @@ class Qwrky7TimeMix(torch.nn.Module):
         
         # kk = F.normalize((k * self.k_k).view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1), dim=-1, p=2.0).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
         kk = F.normalize((k * self.k_k).view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1), dim=-1, p=2.0).view(BATCH_SIZE,SEQ_LEN,-1)
-        
+
         # ---
         # Note the change to ICLR value is intentional here
         # as a means to normalize the value without layernorm
@@ -313,12 +313,64 @@ class Qwrky7TimeMix(torch.nn.Module):
         
         ##########
         # Apply the time mix backend
-        xx, wkv_state_out = RWKV7TimeMix._use_tmix_backend(self.tmix_backend.lower(), r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
+        xx, wkv_state_out = RWKV7TimeMix._run_tmix_backend(self.tmix_backend.lower(), r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
         ##########
 
-        xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
-        xx = xx + ((r.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*k.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*self.r_k).sum(dim=-1, keepdim=True) * v.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)).view(BATCH_SIZE,SEQ_LEN,IN_EMB_SIZE)
-        xx = self.output(xx * g)
+        # xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
+        xx = torch.nn.functional.group_norm(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE), num_groups=N_HEAD, weight=self.ln_x.weight, bias=self.ln_x.bias, eps = self.ln_x.eps).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
 
+        # ---
+        # Intentionally removed for qwrky7
+        # ---
+        # xx = xx + ((r.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*k.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*self.r_k).sum(dim=-1, keepdim=True) * v.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)).view(BATCH_SIZE,SEQ_LEN,IN_EMB_SIZE)
+        
+        xx = self.o_proj(xx * g)
+
+        # Return the results
         return xx, wkv_state_out, v_first_val
     
+    @torch.compile(mode="default")
+    def forward_with_default_compile(self, in_x:Tensor, wkv_state_in:Tensor, v_first_val_in:Tensor, position_embeddings: Tuple[torch.Tensor, torch.Tensor], out_x:Tensor, wkv_state_out:Tensor, v_first_val_out:Tensor) -> tuple[Tensor,Tensor,Tensor,Tensor]:
+        '''
+        Compiled varient of the forward function
+        With no new tensors being created for the output
+        Useful for static memory allocation optimizations inference
+        '''
+        out_x[:], wkv_state_out[:], v_first_val_out[:] = self.forward(in_x, wkv_state_in, v_first_val_in, position_embeddings=position_embeddings)
+        return out_x, wkv_state_out, v_first_val_out
+
+    @torch.compile(mode="reduce-overhead")
+    def forward_with_reduce_compile(self, in_x:Tensor, wkv_state_in:Tensor, v_first_val:Tensor, position_embeddings: Tuple[torch.Tensor, torch.Tensor] = None) -> tuple[Tensor,Tensor,Tensor,Tensor]:
+        '''
+        Compiled varient of the forward function
+        With no input tensor being modified. 
+        Useful for reduce-overhead compile mode
+        '''
+        return self.forward(in_x, wkv_state_in, v_first_val, position_embeddings=position_embeddings)
+    
+    # ---------------------------------
+    #
+    #  Model state handling
+    #
+    # ---------------------------------
+    
+    def load_from_model_state_dict(self, model_state_dict: dict, layer_id:int, non_blocking:bool=True):
+        '''
+        Given the Full/partial RWKV model weights, loaded via `torch.load`
+        Setup the the current module weights, using the layer_id
+        '''
+        # Get the current state_dict
+        current_state_dict = self.state_dict()
+
+        # Iterate each parameter in the state_dict, and compare from the model
+        for n in current_state_dict:
+            model_key = f"blocks.{layer_id}.self_attn.{n}"
+            if model_key not in model_state_dict:
+                continue
+
+            # Copy the values from the state_dict
+            try:
+                current_state_dict[n].copy_(model_state_dict[model_key], non_blocking=non_blocking)
+            except Exception as e:
+                print(f"[ERROR] loading: {model_key} | model shape: {current_state_dict[n].shape} | weight shape: {model_state_dict[model_key].shape}")
+                raise e
