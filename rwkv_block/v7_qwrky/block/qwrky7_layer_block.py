@@ -63,10 +63,10 @@ class Qwrky7LayerBlock(torch.nn.Module):
     def forward(
         self, 
         x:torch.Tensor, # hidden state
-        last_state: tuple[torch.Tensor,torch.Tensor], 
+        last_wkv_state: torch.Tensor, 
         v_first:torch.Tensor,
-        position_embeddings: Tuple[torch.Tensor, torch.Tensor],
-    ) -> tuple[torch.Tensor,tuple[torch.Tensor,torch.Tensor,torch.Tensor],torch.Tensor]:
+        position_embeddings: Tuple[torch.Tensor, torch.Tensor] = None,
+    ) -> tuple[torch.Tensor,torch.Tensor,torch.Tensor]:
         '''
         Forward the block given the input tokens and the last state, and position embeddings
         Last state is a tuple of the following
@@ -80,10 +80,9 @@ class Qwrky7LayerBlock(torch.nn.Module):
         x = x.to(self.input_layernorm.weight.device)
 
         # Forward the time mix, with position embeddings
-        att_out, tmix_shift, tmix_wkv, v_first = self.att(
+        att_out, tmix_wkv, v_first = self.self_attn(
             self.input_layernorm(x),
-            last_state[0], # tmix_shift,
-            last_state[1], # tmix_wkv
+            last_wkv_state, # tmix_wkv,
             v_first,
             position_embeddings=position_embeddings
         )
@@ -91,14 +90,61 @@ class Qwrky7LayerBlock(torch.nn.Module):
         # x = x + att_out
         x = self.drop0(x + att_out)
 
-        mlp_out, mlp_state = self.mlp(
-            self.post_attention_layernorm(x),
-            last_state[2] # cmix_shift,
+        mlp_out = self.mlp(
+            self.post_attention_layernorm(x)
         )
 
         # x = x + ffn_out
         x = self.drop1(x + mlp_out)
 
         # Return the output
-        return x, (tmix_shift, tmix_wkv), v_first
+        return x, tmix_wkv, v_first
     
+    @torch.compile(mode="default")
+    def forward_with_default_compile(
+        self, 
+        in_x:torch.Tensor, 
+        in_wkv_state: torch.Tensor,
+        in_v_first:torch.Tensor,
+        out_x:torch.Tensor, 
+        out_wkv_state: torch.Tensor,
+        out_v_first:torch.Tensor
+        ) -> tuple[torch.Tensor,torch.Tensor,torch.Tensor]:
+        '''
+        Compiled varient of the forward function
+        With no new tensors being created for the output
+        Useful for static memory allocation optimizations inference
+        '''
+        out_x[:], out_wkv_state[:], out_v_first[:] = self.forward(in_x, in_wkv_state, in_v_first)
+        return out_x, out_wkv_state, out_v_first
+
+    @torch.compile(mode="reduce-overhead")
+    def forward_with_reduce_compile(self, in_x: torch.Tensor, in_wkv_state:torch.Tensor, in_v_first:torch.Tensor) -> tuple[torch.Tensor,torch.Tensor,torch.Tensor]:
+        '''
+        Compiled varient of the forward function
+        '''
+        return self.forward(in_x, in_wkv_state, in_v_first)
+    
+    def load_from_model_state_dict(self, model_state_dict:dict, layer_id:int=-1, non_blocking:bool=True):
+        '''
+        Given the Full/partial RWKV model weights, load the block weights accordingly
+        '''
+        if layer_id <= -1:
+            layer_id = self.configMap.get_layer_id(-1)
+        assert layer_id >= 0, f'layer_id must be >= 0, got {layer_id}'
+            
+        # Get the current state_dict
+        current_state_dict = self.state_dict()
+
+        # Iterate each parameter in the state_dict, and compare from the model
+        for n in current_state_dict:
+            model_key = f"model.layers.{layer_id}.{n}"
+            if model_key not in model_state_dict:
+                continue
+
+            # Copy the values from the state_dict
+            try:
+                current_state_dict[n].copy_(model_state_dict[model_key], non_blocking=non_blocking)
+            except Exception as e:
+                print(f"[ERROR] loading: {model_key} | model shape: {current_state_dict[n].shape} | weight shape: {model_state_dict[model_key].shape}")
+                raise e

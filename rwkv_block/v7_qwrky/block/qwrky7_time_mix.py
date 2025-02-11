@@ -313,6 +313,7 @@ class Qwrky7TimeMix(torch.nn.Module):
         
         ##########
         # Apply the time mix backend
+        xx = torch.empty_like(x, device=x.device, dtype=x.dtype)
         xx, wkv_state_out = RWKV7TimeMix._run_tmix_backend(self.tmix_backend.lower(), r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
         ##########
 
@@ -330,7 +331,7 @@ class Qwrky7TimeMix(torch.nn.Module):
         return xx, wkv_state_out, v_first_val
     
     @torch.compile(mode="default")
-    def forward_with_default_compile(self, in_x:Tensor, wkv_state_in:Tensor, v_first_val_in:Tensor, position_embeddings: Tuple[torch.Tensor, torch.Tensor], out_x:Tensor, wkv_state_out:Tensor, v_first_val_out:Tensor) -> tuple[Tensor,Tensor,Tensor,Tensor]:
+    def forward_with_default_compile(self, in_x:Tensor, wkv_state_in:Tensor, v_first_val_in:Tensor, out_x:Tensor, wkv_state_out:Tensor, v_first_val_out:Tensor, position_embeddings: Tuple[torch.Tensor, torch.Tensor]=None) -> tuple[Tensor,Tensor,Tensor]:
         '''
         Compiled varient of the forward function
         With no new tensors being created for the output
@@ -340,7 +341,7 @@ class Qwrky7TimeMix(torch.nn.Module):
         return out_x, wkv_state_out, v_first_val_out
 
     @torch.compile(mode="reduce-overhead")
-    def forward_with_reduce_compile(self, in_x:Tensor, wkv_state_in:Tensor, v_first_val:Tensor, position_embeddings: Tuple[torch.Tensor, torch.Tensor] = None) -> tuple[Tensor,Tensor,Tensor,Tensor]:
+    def forward_with_reduce_compile(self, in_x:Tensor, wkv_state_in:Tensor, v_first_val:Tensor, position_embeddings: Tuple[torch.Tensor, torch.Tensor] = None) -> tuple[Tensor,Tensor,Tensor]:
         '''
         Compiled varient of the forward function
         With no input tensor being modified. 
@@ -364,7 +365,7 @@ class Qwrky7TimeMix(torch.nn.Module):
 
         # Iterate each parameter in the state_dict, and compare from the model
         for n in current_state_dict:
-            model_key = f"blocks.{layer_id}.self_attn.{n}"
+            model_key = f"model.layers.{layer_id}.self_attn.{n}"
             if model_key not in model_state_dict:
                 continue
 
