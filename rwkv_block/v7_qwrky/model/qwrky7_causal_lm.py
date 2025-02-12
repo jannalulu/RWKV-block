@@ -12,7 +12,10 @@ class Qwrky7CausalLM(nn.Module):
         super().__init__()
         self.config = Qwrky7ConfigMap.normalize(config)
         self.model = Qwrky7Model(self.config)
-        self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
+
+        device = self.config.get_device(None)
+        dtype = self.config.get_dtype('bfloat16')
+        self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False).to(device, dtype=dtype)
 
     def load_from_model_state_dict(self, state_dict: dict, non_blocking:bool=True):
         '''
@@ -21,6 +24,12 @@ class Qwrky7CausalLM(nn.Module):
         '''
         self.model.load_from_model_state_dict(state_dict, non_blocking=non_blocking)
         self.lm_head.weight.copy_(state_dict['lm_head.weight'])
+
+    def get_init_state(self, batch_size:int=1, skip_init_state:bool=False) -> list[torch.Tensor]:
+        '''
+        Get an initialized copy of the model state, for the given batch size
+        '''
+        return self.model.get_init_state(batch_size, skip_init_state=skip_init_state)
 
     def forward(
             self, 

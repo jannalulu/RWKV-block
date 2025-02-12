@@ -20,6 +20,8 @@ class Qwrky7ConfigMap(Qwrky7BlockConfigMap):
     # ---
     def __init__(
         self,
+        num_hidden_layers: int,
+        hidden_size: int,
         vocab_size: int = 65536,
         init_state_wkv: bool = False,
         forward_chunk_size: Optional[int] = 4096,
@@ -30,7 +32,7 @@ class Qwrky7ConfigMap(Qwrky7BlockConfigMap):
         self.init_state_wkv = init_state_wkv
         self.forward_chunk_size = forward_chunk_size
         self.padding_idx = padding_idx
-        super().__init__(**kwargs)
+        super().__init__(num_hidden_layers=num_hidden_layers, hidden_size=hidden_size, **kwargs)
         
     @staticmethod
     def normalize(config_map: any) -> 'Qwrky7ConfigMap':
@@ -57,8 +59,8 @@ class Qwrky7ConfigMap(Qwrky7BlockConfigMap):
         # Iterate and count the layers
         num_hidden_layers = 0
         for key in state_dict.keys():
-            if key.startswith('layers.'):
-                idx = key.split('.')[1]
+            if key.startswith('model.layers.'):
+                idx = key.split('.')[2]
                 num_hidden_layers = max(num_hidden_layers, int(idx)+1)
 
         # Enable wkv_state

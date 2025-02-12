@@ -6,16 +6,30 @@ from torch.nn import functional as F
 
 from .rwkv7_block_config_map import RWKV7BlockConfigMap
 
-# Check for triton package, if GPU is available
-triton = None
-if torch.cuda.is_available():
-    try:
-        import triton
-    except ImportError:
-        triton = None
-else:
-    print("[WARNING] Triton not available, falling back to pytorch mode by default - this is significantly slower")
+# Checks if a package is installed and importable
+import importlib.util
+import sys
 
+def has_python_package(name):
+    '''
+    Checks if a package is installed and importable
+    '''
+    if name in sys.modules:
+        return True
+    if importlib.util.find_spec(name) is not None:
+        return True
+    return False
+
+# Check for triton and fla packages
+_has_triton = has_python_package("triton")
+_has_fla = has_python_package("fla")
+_has_cuda = torch.cuda.is_available()
+
+# Warning if FLA is not available
+if not _has_fla:
+    print("[WARNING] fla not available, falling back to cuda or pytorch mode - install fla from `https://github.com/fla-org/flash-linear-attention`")
+
+# Check if the FLA package is available
 class RWKV7TimeMix(torch.nn.Module):
     '''
     Time Mix block for RWKV V7
@@ -338,11 +352,20 @@ def _run_tmix_backend(
     tmix_backend,
     r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in
 ):
+    # Auto select the backend if not specified
     if tmix_backend == "auto":
-        if triton is None or r.device.type == "cpu":
+        if r.device.type == "cpu":
             tmix_backend = "pytorch"
-        else:
+        elif _has_fla is True:
+            tmix_backend = "fla"
+        elif _has_triton is True:
+            tmix_backend = "triton"
+        elif _has_cuda is True:
             tmix_backend = "cuda"
+        else:
+            tmix_backend = "pytorch"
+
+    # Tracking the dtype
     xx_dtype = xx.dtype
 
     ######## cuda-based method 

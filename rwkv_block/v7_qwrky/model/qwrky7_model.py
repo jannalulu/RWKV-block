@@ -34,7 +34,7 @@ class Qwrky7Model(nn.Module):
         head_size = configMap.head_size
 
         # Embedding layer
-        self.embed_tokens = nn.Embedding(vocab_size, hidden_size, padding_idx)
+        self.embed_tokens = nn.Embedding(vocab_size, hidden_size, padding_idx).to(device, dtype=dtype)
 
         # main layers
         self.layers = nn.ModuleList(
@@ -42,7 +42,7 @@ class Qwrky7Model(nn.Module):
         )
 
         # ln_out
-        self.norm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.norm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps).to(device, dtype=dtype)
         # self.rotary_emb = Qwen2RotaryEmbedding(config=config)
 
         # init state tuning support
@@ -50,7 +50,7 @@ class Qwrky7Model(nn.Module):
             stateTuneList = [None]*num_hidden_layers
             for i in range(num_hidden_layers):
                 stateTuneList[i] = nn.ParameterDict({
-                    "wkv": nn.Parameter(torch.zeros(hidden_size // head_size, head_size, head_size, device=device, dtype=dtype)),
+                    "wkv": nn.Parameter(torch.zeros(hidden_size // head_size, head_size, head_size, device=device, dtype=torch.float)),
                 })
             self.init_state = nn.ParameterList(stateTuneList)
 
@@ -107,8 +107,8 @@ class Qwrky7Model(nn.Module):
         
         if self.configMap.init_state_wkv:
             for i in range(self.configMap.num_hidden_layers):
-                if 'init_state.'+str(i)+'.wkv' in state_dict:
-                    self.init_state[i]["wkv"].data.copy_(state_dict['init_state.'+str(i)+'.wkv'], non_blocking=True)
+                if 'model.init_state.'+str(i)+'.wkv' in state_dict:
+                    self.init_state[i]["wkv"].data.copy_(state_dict['model.init_state.'+str(i)+'.wkv'], non_blocking=True)
 
     ### ---
     ###
@@ -129,8 +129,7 @@ class Qwrky7Model(nn.Module):
         # Prepare the initial state
         init_state = [ None for i in range(num_hidden_layers) ]
         for i in range(num_hidden_layers):
-            device = self.layers[i].ln1.weight.data.device
-            dtype = self.layers[i].ln1.weight.data.dtype
+            device = self.layers[i].self_attn.q_proj.weight.data.device
 
             # Use the saved init_state if enabled
             # TODO: Consider letting the wkv_state dtype be a parameter
@@ -244,8 +243,8 @@ class Qwrky7Model(nn.Module):
                 ret_stateList[i] = last_layer_state
                 
         # Final layer norm, without the head
-        x_hidden_state = x_hidden_state.to(self.ln_out.weight.device, non_blocking=True)
-        x_hidden_state = self.ln_out(x_hidden_state)
+        x_hidden_state = x_hidden_state.to(self.norm.weight.device, non_blocking=True)
+        x_hidden_state = self.norm(x_hidden_state)
 
         # Return the output and the state list
         return x_hidden_state, ret_stateList

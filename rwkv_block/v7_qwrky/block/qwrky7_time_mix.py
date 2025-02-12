@@ -6,7 +6,7 @@ from torch import nn
 
 from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb
 
-from ...v7_goose.block.rwkv7_time_mix import RWKV7TimeMix, _run_tmix_backend
+from ...v7_goose.block.rwkv7_time_mix import RWKV7TimeMix, _run_tmix_backend, _has_fla, _has_triton, _has_cuda
 from .qwrky7_block_config_map import Qwrky7BlockConfigMap
 
 class Qwrky7TimeMix(torch.nn.Module):
@@ -313,11 +313,27 @@ class Qwrky7TimeMix(torch.nn.Module):
             v_first_val = v # store the v of the first layer
         else:
             v = v + (v_first_val - v) * torch.sigmoid(self.v0 + (xv @ self.v1) @ self.v2) # add value residual
-        
+            
         ##########
+        # Auto select the backend if not specified
+        tmix_backend = self.tmix_backend.lower()
+        if tmix_backend == "auto":
+            if r.device.type == "cpu":
+                tmix_backend = "pytorch"
+            elif _has_fla is True:
+                tmix_backend = "fla"
+            elif _has_triton is True:
+                tmix_backend = "triton"
+            else:
+                tmix_backend = "pytorch"
+
+        # Warn against CUDA backend
+        if tmix_backend == "cuda" and HEAD_SIZE != 64:
+            print(f"[WARNING] !!! CUDA backend has potential memory safety issues for qwrky for non-64 head sizes !!!")
+
         # Apply the time mix backend
         xx = torch.empty_like(x, device=x.device, dtype=x.dtype)
-        xx, wkv_state_out = _run_tmix_backend(self.tmix_backend.lower(), r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
+        xx, wkv_state_out = _run_tmix_backend(tmix_backend, r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
         ##########
 
         xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
