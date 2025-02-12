@@ -79,6 +79,11 @@ class RefCudaWindBackstepping(torch.autograd.Function):
 
 @torch.compiler.disable()
 def rwkv7_attn_cuda_ref(q,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
+    q,w,k,v, kk,iclr = [i.bfloat16().contiguous() for i in [q,w,k,v,kk,iclr]]
+    return rwkv7_attn_cuda_ref_no_compile(q,w,k,v, kk,iclr, HEAD_SIZE, s0)
+
+@torch.compiler.disable()
+def rwkv7_attn_cuda_ref_no_compile(q,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
     # Preload the kernel
     load_ref_wkv_cuda_kernel()
 
@@ -92,6 +97,7 @@ def rwkv7_attn_cuda_ref(q,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
 
     # Initialize the state, if not provided - for compatibility (THE STATE IS NOT UPDATED)
     s0 = torch.zeros(B,H,C,C, dtype=torch.float,device=w.device) if s0 is None else s0
+    s0 = s0.contiguous()
     
     # Handling the cuda kernel
     q,w,k,v,a,b = [i.view(B,T,H,C).contiguous() for i in [q,w,k,v,(-kk),(kk*iclr)]]
@@ -168,8 +174,12 @@ class CudaWindBackstepping(torch.autograd.Function):
         wkv_cuda_backward(state, w,q,k,v,z,b, dy,s,sa, dw,dq,dk,dv,dz,db)
         return dS0,dw,dq,dk,dv,dz,db
 
-@torch.compiler.disable()
 def rwkv7_attn_cuda(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
+    r,w,k,v, kk,iclr = [i.bfloat16().contiguous() for i in [r,w,k,v,kk,iclr]]
+    return rwkv7_attn_cuda_no_compile(r,w,k,v, kk,iclr, HEAD_SIZE, s0)
+
+@torch.compiler.disable()
+def rwkv7_attn_cuda_no_compile(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
     # Preload the kernel
     load_wkv_cuda_kernel(HEAD_SIZE=HEAD_SIZE)
 
@@ -185,7 +195,7 @@ def rwkv7_attn_cuda(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
 
     # Initialize the state
     s0 = torch.zeros(B,H,C,C, dtype=torch.float,device=w.device) if s0 is None else s0
-    sT = s0.to(dtype=torch.float)
+    sT = s0.to(dtype=torch.float).contiguous()
 
     # Optimize the call, if chunk is multiple of 16
     if chunk_remainder == 0:

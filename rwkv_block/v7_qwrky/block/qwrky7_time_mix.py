@@ -100,9 +100,9 @@ class Qwrky7TimeMix(torch.nn.Module):
             self.r_k = nn.Parameter(torch.empty(n_head, head_size, device=device, dtype=dtype))
 
         # Renamed to q,k,v,o_proj : in line with transformers naming
-        self.q_proj = nn.Linear(hidden_size, hidden_size, bias=False, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(hidden_size, hidden_size_att, bias=False, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(hidden_size, hidden_size_att, bias=False, device=device, dtype=dtype)
+        self.q_proj = nn.Linear(hidden_size, hidden_size, bias=True, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(hidden_size, hidden_size_att, bias=True, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(hidden_size, hidden_size_att, bias=True, device=device, dtype=dtype)
         self.o_proj = nn.Linear(hidden_size, hidden_size, bias=False, device=device, dtype=dtype)
 
         self.ln_x = nn.GroupNorm(n_head, hidden_size, device=device, dtype=dtype, eps=(1e-5)*head_size)
@@ -223,6 +223,9 @@ class Qwrky7TimeMix(torch.nn.Module):
         - output v_first_val of shape [batch_size, seq_len, embedding_size]
         '''
 
+        # x dtype
+        x_dtype = x.dtype
+
         # Get the sizing
         BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE = x.size()
         N_HEAD = self.n_head
@@ -317,15 +320,15 @@ class Qwrky7TimeMix(torch.nn.Module):
         xx, wkv_state_out = _run_tmix_backend(self.tmix_backend.lower(), r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
         ##########
 
-        # xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
-        xx = torch.nn.functional.group_norm(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE), num_groups=N_HEAD, weight=self.ln_x.weight, bias=self.ln_x.bias, eps = self.ln_x.eps).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
+        xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
+        # xx = torch.nn.functional.group_norm(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE).float(), num_groups=N_HEAD, weight=self.ln_x.weight.float(), bias=self.ln_x.bias.float(), eps = self.ln_x.eps).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE).to(dtype=x_dtype)
 
         # ---
         # Intentionally removed for qwrky7
         # ---
         # xx = xx + ((r.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*k.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*self.r_k).sum(dim=-1, keepdim=True) * v.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)).view(BATCH_SIZE,SEQ_LEN,IN_EMB_SIZE)
         
-        xx = self.o_proj(xx * g)
+        xx = self.o_proj(xx * g).to(dtype=x_dtype)
 
         # Return the results
         return xx, wkv_state_out, v_first_val
