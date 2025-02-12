@@ -147,6 +147,7 @@ class RWKV7PreTrainedModel(PreTrainedModel):
     gradient_checkpointing = True
 
     def __init__(self, config: RWKV7Config=None):
+        # Work around for multiple inheritance
         if config is None and self.config is not None:
             config = self.config
         else:

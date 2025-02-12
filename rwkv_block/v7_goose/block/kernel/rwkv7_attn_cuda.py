@@ -197,18 +197,29 @@ def rwkv7_attn_cuda_no_compile(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
     s0 = torch.zeros(B,H,C,C, dtype=torch.float,device=w.device) if s0 is None else s0
     sT = s0.to(dtype=torch.float).contiguous()
 
-    # Optimize the call, if chunk is multiple of 16
-    if chunk_remainder == 0:
-        chunk_xx, chunk_sT = rwkv7_attn_cuda_chunk(r,w,k,v, kk,iclr, HEAD_SIZE, sT)
-        return chunk_xx, chunk_sT.to(dtype=s0.dtype)
+    # If its smaller then a chunk, use the pytorch implementation
     if T < 16: 
-        return rwkv7_attn_pytorch_ref_fp32(
-            r,w,k,v, 
+        chunk_xx, chunk_sT = rwkv7_attn_pytorch_chunk(
+            r,(-w.float().exp()).exp(),
+            k,v, 
             kk,iclr, 
             B, T, H, C, 
             torch.empty(B, T, HC, device=w.device, dtype=w.dtype),
             sT
         )
+        # chunk_xx, chunk_sT = rwkv7_attn_pytorch_ref_fp32(
+        #     r,w,k,v, 
+        #     kk,iclr, 
+        #     B, T, H, C, 
+        #     torch.empty(B, T, HC, device=w.device, dtype=w.dtype),
+        #     sT
+        # )
+        return chunk_xx, chunk_sT.to(dtype=s0.dtype)
+
+    # Optimize the call, if chunk is multiple of 16
+    if chunk_remainder == 0:
+        chunk_xx, chunk_sT = rwkv7_attn_cuda_chunk(r,w,k,v, kk,iclr, HEAD_SIZE, sT)
+        return chunk_xx, chunk_sT.to(dtype=s0.dtype)
 
     # Compute the number of chunks
     chunks = T // 16
@@ -222,19 +233,21 @@ def rwkv7_attn_cuda_no_compile(r,w,k,v, kk,iclr, HEAD_SIZE=64, s0=None):
 
     # Get the remainder
     # ---
-    # remain_xx, last_sT = rwkv7_attn_pytorch_chunk(
-    #     r[:,si:],torch.exp(-torch.exp(w[:,si:])),k[:,si:],v[:,si:], kk[:,si:],iclr[:,si:], 
-    #     B, H, C, 
-    #     torch.zeros(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 
-    #     chunk_sT, chunk_size=chunk_remainder
-    # )
-    remain_xx, last_sT = rwkv7_attn_pytorch_ref_fp32(
-        r[:,si:],w[:,si:],k[:,si:],v[:,si:], 
+    remain_xx, last_sT = rwkv7_attn_pytorch_chunk(
+        r[:,si:],(-w[:,si:].float().exp()).exp(),
+        k[:,si:],v[:,si:], 
         kk[:,si:],iclr[:,si:], 
         B, chunk_remainder, H, C, 
-        torch.empty(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 
+        torch.zeros(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 
         chunk_sT
-    )
+    ) 
+    # remain_xx, last_sT = rwkv7_attn_pytorch_ref_fp32(
+    #     r[:,si:],w[:,si:],k[:,si:],v[:,si:], 
+    #     kk[:,si:],iclr[:,si:], 
+    #     B, chunk_remainder, H, C, 
+    #     torch.empty(B, chunk_remainder, HC, device=w.device, dtype=w.dtype), 
+    #     chunk_sT
+    # )
 
     # Concatenate and return results
     return torch.cat([chunk_xx.to(dtype=w.dtype), remain_xx.to(dtype=w.dtype)], dim=1), last_sT.to(dtype=s0.dtype)

@@ -145,9 +145,9 @@ def rwkv7_attn_pytorch_ref_fp32(
 
 def rwkv7_attn_pytorch_chunk(
     r,w,k,v, kk,a, 
-    BATCH_SIZE, N_HEAD, HEAD_SIZE,
+    BATCH_SIZE, chunk_size, N_HEAD, HEAD_SIZE,
     xx, wkv_state_in,
-    offset=0, chunk_size=16
+    offset=0
 ):
     '''
     Chunked version of the RWKV7 attention, for better performance. 
