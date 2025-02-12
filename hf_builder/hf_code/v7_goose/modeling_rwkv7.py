@@ -87,7 +87,7 @@ class RWKV7State(Cache):
 
     def crop(self, max_length: int):
         # can't implement this for linear attention variants, skips
-        return
+        raise NotImplementedError('Cannot crop Linear Attention state')
 
     @torch.no_grad
     def update(
