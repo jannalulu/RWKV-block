@@ -51,7 +51,7 @@ def full_build_mmlu_test_dataset(
         raise ValueError("Tokenizer shuld be an instance of AutoTokenizer or a string (which is used to load the AutoTokenizer).")
     
     # HF dataset to use
-    hf_dataset_name = "cais/mmlu"
+    hf_dataset_name = "hails/mmlu_no_train"
 
     # Dataset threads to use
     dataset_threads = max(int(os.cpu_count()), 1)
@@ -142,7 +142,7 @@ def full_build_mmlu_test_dataset(
         subject_threads = 1
 
     # Build the cache key
-    format_revision = 0
+    format_revision = 1
     cache_key = f"mmlu-{test_set}-t_{tokenizer_str}-n_{n_shot}-p_{min_right_pad_tokens}-c_{prompt_chunk_size}-r{format_revision}"
 
     # Hash of the current file
@@ -157,9 +157,9 @@ def full_build_mmlu_test_dataset(
 
     # Fromat data sample, from question, and choices, and the answer
     def format_datasample(datasample, include_answer=True):
-        res = "" + datasample["question"]
+        res = "Question: " + datasample["question"].strip()
         for i, choice in enumerate(datasample["choices"]):
-            res += f"\n{choice_letters[i]}. {choice}"
+            res += f"\n{choice_letters[i]}. {choice.strip()}"
         res += "\nAnswer: "
         if include_answer:
             res += f"{choice_letters[datasample["answer"]]}\n\n"
@@ -180,7 +180,7 @@ def full_build_mmlu_test_dataset(
         return ret_prompt
 
     def process_subject(subject):
-        prompt_prefix = "The following are multiple choice questions (with answers) about {}.\n\n".format(
+        prompt_prefix = "The following are questions (with answers) about {}.\n\n".format(
             subject.replace("_", " ")
         )
 
@@ -342,7 +342,7 @@ def cache_build_mmlu_test_dataset(
     test_set = "val" if use_validation_set else "test"
 
     # Build the cache key
-    format_revision = 0
+    format_revision = 1
     cache_key = f"mmlu-{test_set}-t_{tokenizer_str}-n_{n_shot}-p_{min_right_pad_tokens}-c_{prompt_chunk_size}-r{format_revision}.pth"
 
     # Use the __file__/.mmlu_cache as the cache directory

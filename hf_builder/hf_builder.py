@@ -349,9 +349,9 @@ def hf_builder(args):
         config_json["architectures"] = ["RWKV7ForCausalLM", "RWKV7Model", "RWKV7PreTrainedModel"]
     elif model_class == "v7_qwrky":
         config_json["auto_map"] = {
-            "AutoConfig": "configuration_rwkv7.Qwrky7Config",
-            "AutoModel": "modeling_rwkv7.Qwrky7BaseModel",
-            "AutoModelForCausalLM": "modeling_rwkv7.Qwrky7ForCausalLM"
+            "AutoConfig": "configuration_qwrky7.Qwrky7Config",
+            "AutoModel": "modeling_qwrky7.Qwrky7BaseModel",
+            "AutoModelForCausalLM": "modeling_qwrky7.Qwrky7ForCausalLM"
         }
         config_json["architectures"] = ["Qwrky7ForCausalLM", "Qwrky7BaseModel", "Qwrky7PreTrainedModel"]
     else:

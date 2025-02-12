@@ -321,17 +321,17 @@ class Qwrky7TimeMix(torch.nn.Module):
             if r.device.type == "cpu":
                 tmix_backend = "pytorch"
             elif _has_triton is True:
-                tmix_backend = "triton"
+                tmix_backend = "triton_bighead"
             elif _has_fla is True:
                 tmix_backend = "fla"
-            # elif _has_cuda is True:
-            #     tmix_backend = "cuda"
+            elif _has_cuda is True:
+                tmix_backend = "cuda"
             else:
                 tmix_backend = "pytorch"
 
-        # Warn against CUDA backend
-        if tmix_backend == "cuda" and HEAD_SIZE != 64:
-            print(f"[WARNING] !!! CUDA backend has potential memory safety issues for qwrky for non-64 head sizes !!!")
+        # # Warn against CUDA backend
+        # if tmix_backend == "cuda" and HEAD_SIZE != 64:
+        #     print(f"[WARNING] !!! CUDA backend has potential memory safety issues for qwrky for non-64 head sizes !!!")
 
         # Apply the time mix backend
         xx = torch.empty_like(x, device=x.device, dtype=x.dtype)
