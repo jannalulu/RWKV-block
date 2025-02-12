@@ -66,31 +66,74 @@ def save_model_code_to_output_dir(output_dir, model_class):
 ####
 # Script builder
 ####
-def build_rwkv_v7_goose():
+def build_v7_goose():
+    hf_script_builder(
+        target_dir=f"{current_dir}/hf_code/v7_goose",
+        source_dir=f"{current_dir}/../rwkv_block/v7_goose",
+        source_cuda_dir=f"{current_dir}/../rwkv_block/v7_goose/block/kernel/cuda",
+        build_file_order = [
+            "block/kernel/rwkv7_attn_pytorch.py",
+            "block/kernel/rwkv7_attn_cuda.py",
+            "block/kernel/rwkv7_attn_fla.py",
+            "block/kernel/rwkv7_attn_triton.py",
+            "block/rwkv7_block_config_map.py",
+            "block/rwkv7_channel_mix.py",
+            "block/rwkv7_time_mix.py",
+            "block/rwkv7_layer_block.py",
+            "model/rwkv7_goose_config_map.py",
+            "model/rwkv7_goose_model.py",
+        ],
+        build_file_name="modeling_blocks_rwkv7.py"
+    )
+
+def build_v7_qwrky():
+    hf_script_builder(
+        target_dir=f"{current_dir}/hf_code/v7_qwrky",
+        source_dir=f"{current_dir}/../rwkv_block/v7_goose",
+        source_cuda_dir=f"{current_dir}/../rwkv_block/v7_goose/block/kernel/cuda",
+        build_file_order = [
+            "block/kernel/rwkv7_attn_pytorch.py",
+            "block/kernel/rwkv7_attn_cuda.py",
+            "block/kernel/rwkv7_attn_fla.py",
+            "block/kernel/rwkv7_attn_triton.py",
+            "block/rwkv7_block_config_map.py",
+            "block/rwkv7_channel_mix.py",
+            "block/rwkv7_time_mix.py",
+            "block/rwkv7_layer_block.py",
+            # "model/rwkv7_goose_config_map.py",
+            # "model/rwkv7_goose_model.py",
+            "../v7_qwrky/block/qwrky7_block_config_map.py",
+            "../v7_qwrky/block/qwrky7_layer_block.py",
+            "../v7_qwrky/block/qwrky7_time_mix.py",
+            "../v7_qwrky/model/qwrky7_config_map.py",
+            "../v7_qwrky/model/qwrky7_model.py",
+            "../v7_qwrky/model/qwrky7_causal_lm.py",
+        ],
+        build_file_name="modeling_blocks_qwrky7.py"
+    )
+
+def hf_script_builder(
+    target_dir,
+    source_dir,
+    source_cuda_dir,
+    build_file_order: list[str],
+    build_file_name
+):
     '''
     For whatever reason, HF do not like nested python files, and require everything to be
     in the the top level directory. Somewhat. This is a hack to copy and merge all the files.
     '''
-    source_dir = Path(f"{current_dir}/../rwkv_block/v7_goose")
-    target_dir = Path(f"{current_dir}/hf_code/v7_goose")
-    target_file = Path(f"{current_dir}/hf_code/v7_goose/modeling_blocks_rwkv7.py")
+
+    # Normalize dir to Path
+    target_dir = target_dir if isinstance(target_dir, Path) else Path(target_dir)
+    source_dir = source_dir if isinstance(source_dir, Path) else Path(source_dir)
+    source_cuda_dir = source_cuda_dir if isinstance(source_cuda_dir, Path) else Path(source_cuda_dir)
+
+    # Define the target file path
+    target_file = Path(f"{target_dir}/{build_file_name}")
     
     # Copy over the cuda files
-    shutil.copytree(source_dir / "block/kernel/cuda", target_dir / "cuda", dirs_exist_ok=True)
-
-    # Compilation file order
-    build_file_order = [
-        "block/kernel/rwkv7_attn_pytorch.py",
-        "block/kernel/rwkv7_attn_cuda.py",
-        "block/kernel/rwkv7_attn_fla.py",
-        "block/kernel/rwkv7_attn_triton.py",
-        "block/rwkv7_block_config_map.py",
-        "block/rwkv7_channel_mix.py",
-        "block/rwkv7_time_mix.py",
-        "block/rwkv7_layer_block.py",
-        "model/rwkv7_goose_config_map.py",
-        "model/rwkv7_goose_model.py",
-    ]
+    shutil.copytree(source_cuda_dir, target_dir / "cuda", dirs_exist_ok=True)
 
     # Compile the files, into a single string
     compiled_code = [
@@ -205,7 +248,9 @@ def hf_builder(args):
     # Copy rwkv_block code files
     print("Building rwkv_block into HF code ...")
     if model_class == "v7_goose":
-        build_rwkv_v7_goose()
+        build_v7_goose()
+    elif model_class == "v7_qwrky":
+        build_v7_qwrky()
     else:
         raise ValueError(f"Unsupported model class: {model_class}")
 
@@ -218,6 +263,9 @@ def hf_builder(args):
     if model_class == "v7_goose":
         from hf_code.v7_goose.configuration_rwkv7 import RWKV7Config
         model_config = RWKV7Config.from_model_state_dict(state_dict)
+    elif model_class == "v7_qwrky":
+        from hf_code.v7_qwrky.configuration_qwrky7 import Qwrky7Config
+        model_config = Qwrky7Config.from_model_state_dict(state_dict)
     else:
         raise ValueError(f"Unsupported model class: {model_class}")
     
@@ -231,6 +279,9 @@ def hf_builder(args):
     if model_class == "v7_goose":
         from hf_code.v7_goose.modeling_rwkv7 import RWKV7Model
         model_instance = RWKV7Model(model_config)
+    elif model_class == "v7_qwrky":
+        from hf_code.v7_qwrky.modeling_qwrky7 import Qwrky7ForCausalLM
+        model_instance = Qwrky7ForCausalLM(model_config)
     else:
         raise ValueError(f"Unsupported model class: {model_class}")
 
@@ -242,6 +293,8 @@ def hf_builder(args):
             tokenizer_type = "world"
         elif model_config.vocab_size >= 50304 and model_config.vocab_size <= 50432:
             tokenizer_type = "neox"
+        elif model_config.vocab_size >= 152064 and model_config.vocab_size <= 152064:
+            tokenizer_type = "qwen2"
         else:
             raise ValueError(f"Unable to detect tokenizer type for: {tokenizer_type} (vocab_size: {model_config.vocab_size})")
         
@@ -250,6 +303,17 @@ def hf_builder(args):
 
     # Load the model files
     print("Loading model state into class ...")
+
+    # Removing known state dict key with issues
+    rmv_state_keys = [
+        "model.layers.0.self_attn.v0",
+        "model.layers.0.self_attn.v1",
+        "model.layers.0.self_attn.v2"
+    ]
+    for key in rmv_state_keys:
+        if key in state_dict:
+            del state_dict[key]
+
     model_instance.load_state_dict(state_dict)
 
     # print("-----------------------------")
@@ -272,6 +336,9 @@ def hf_builder(args):
     config_json_path = Path(f"{args.output_dir}/config.json")
     config_json = json.load(config_json_path.open())
 
+    # Delete the layer_id attribute (why is this even here?)
+    del config_json["layer_id"]
+
     # Fill in the auto_map, and architecture
     if model_class == "v7_goose":
         config_json["auto_map"] = {
@@ -280,9 +347,13 @@ def hf_builder(args):
             "AutoModelForCausalLM": "modeling_rwkv7.RWKV7ForCausalLM"
         }
         config_json["architectures"] = ["RWKV7ForCausalLM", "RWKV7Model", "RWKV7PreTrainedModel"]
-        
-        # Delete the layer_id attribute
-        del config_json["layer_id"]
+    elif model_class == "v7_qwrky":
+        config_json["auto_map"] = {
+            "AutoConfig": "configuration_rwkv7.Qwrky7Config",
+            "AutoModel": "modeling_rwkv7.Qwrky7BaseModel",
+            "AutoModelForCausalLM": "modeling_rwkv7.Qwrky7ForCausalLM"
+        }
+        config_json["architectures"] = ["Qwrky7ForCausalLM", "Qwrky7BaseModel", "Qwrky7PreTrainedModel"]
     else:
         raise ValueError(f"Unsupported model class: {model_class}")
 
@@ -300,7 +371,7 @@ def main():
     parser.add_argument("model_source", help="Path to RWKV model file in .pth or .safetensors format")
     parser.add_argument("output_dir", help="Directory to output the converted HuggingFace model")
     parser.add_argument("--model_class", default="v7_goose", help="Model class (default: v7_goose)")
-    parser.add_argument("--tokenizer_type", default="auto", help="Tokenizer to use, either 'auto','world' or 'neox' (default: auto)")
+    parser.add_argument("--tokenizer_type", default="auto", help="Tokenizer to use, either 'auto','world','neox' or 'qwen2' (default: auto)")
     args = parser.parse_args()
     hf_builder(args)
 

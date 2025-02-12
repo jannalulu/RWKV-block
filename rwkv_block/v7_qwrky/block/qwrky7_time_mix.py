@@ -320,10 +320,12 @@ class Qwrky7TimeMix(torch.nn.Module):
         if tmix_backend == "auto":
             if r.device.type == "cpu":
                 tmix_backend = "pytorch"
-            elif _has_fla is True:
-                tmix_backend = "fla"
             elif _has_triton is True:
                 tmix_backend = "triton"
+            elif _has_fla is True:
+                tmix_backend = "fla"
+            # elif _has_cuda is True:
+            #     tmix_backend = "cuda"
             else:
                 tmix_backend = "pytorch"
 

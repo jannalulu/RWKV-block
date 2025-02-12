@@ -74,8 +74,9 @@ class Qwrky7Model(nn.Module):
         # Reinit the Embedding layer
         self.embed_tokens.reset_parameters()
 
-        # Reinit the norm and head
-        self.norm.reset_parameters()
+        # Reinit the RMSNorm
+        self.norm.weight.data.fill_(1.0)
+
         # if self.lm_head is not None:
         #     self.lm_head.reset_parameters()
 

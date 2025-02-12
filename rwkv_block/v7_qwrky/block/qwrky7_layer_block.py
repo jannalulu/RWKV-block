@@ -33,7 +33,7 @@ class Qwrky7LayerBlock(torch.nn.Module):
         # Get required props
         hidden_size = configMap.hidden_size
         device = configMap.get_device(None)
-        dtype = configMap.get_dtype(None)
+        dtype = configMap.get_dtype('bfloat16')
         rms_norm_eps = configMap.rms_norm_eps
 
         # Setup the modules
