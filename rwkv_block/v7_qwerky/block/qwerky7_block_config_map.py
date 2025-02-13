@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from ...v7_goose.block.rwkv7_block_config_map import RWKV7BlockConfigMap
 
 @dataclass
-class Qwrky7BlockConfigMap(RWKV7BlockConfigMap):
+class Qwerky7BlockConfigMap(RWKV7BlockConfigMap):
 
     # RMS Norm eps
     rms_norm_eps: float = 1e-6
-    # Qwrky headsize defaults to 128 (Not 64)
+    # Qwerky headsize defaults to 128 (Not 64)
     head_size: int = 128
 
     # # Attention QKV bias
@@ -49,25 +49,25 @@ class Qwrky7BlockConfigMap(RWKV7BlockConfigMap):
     # Duplicator & Normalizer
     # ---
 
-    def new_block_config_map(self, **kwargs) -> 'Qwrky7BlockConfigMap':
+    def new_block_config_map(self, **kwargs) -> 'Qwerky7BlockConfigMap':
         '''
         Returns a new config map with updated values
         '''
 
         new_dict = {}
-        for key in Qwrky7BlockConfigMap.__dataclass_fields__:
+        for key in Qwerky7BlockConfigMap.__dataclass_fields__:
             if key in self.__dict__:
                 new_dict[key] = self.__dict__[key]
         new_dict.update(kwargs)
 
-        return Qwrky7BlockConfigMap(**new_dict)
+        return Qwerky7BlockConfigMap(**new_dict)
 
     @staticmethod
-    def normalize(config_map: any) -> 'Qwrky7BlockConfigMap':
+    def normalize(config_map: any) -> 'Qwerky7BlockConfigMap':
         '''
-        Converts either maps, objs or Qwrky7BlockConfigMap
+        Converts either maps, objs or Qwerky7BlockConfigMap
         '''
-        if isinstance(config_map, Qwrky7BlockConfigMap):
+        if isinstance(config_map, Qwerky7BlockConfigMap):
             return config_map
         
         dict_obj = None
@@ -77,11 +77,11 @@ class Qwrky7BlockConfigMap(RWKV7BlockConfigMap):
             dict_obj = config_map.__dict__
         
         if dict_obj is not None:
-            # Filter for only valeus in Qwrky7BlockConfigMap
+            # Filter for only valeus in Qwerky7BlockConfigMap
             new_dict = {}
             for key, value in dict_obj.items():
-                if key in Qwrky7BlockConfigMap.__dataclass_fields__:
+                if key in Qwerky7BlockConfigMap.__dataclass_fields__:
                     new_dict[key] = value
-            return Qwrky7BlockConfigMap(**new_dict)
+            return Qwerky7BlockConfigMap(**new_dict)
 
         raise ValueError(f"Unsupported config_map type: {type(config_map)}")

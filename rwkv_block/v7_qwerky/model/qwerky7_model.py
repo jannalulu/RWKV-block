@@ -3,25 +3,25 @@ from torch import nn
 from torch import Tensor
 from typing import Union
 
-from .qwrky7_config_map import Qwrky7ConfigMap
-from ..block.qwrky7_layer_block import Qwrky7LayerBlock
+from .qwerky7_config_map import Qwerky7ConfigMap
+from ..block.qwerky7_layer_block import Qwerky7LayerBlock
 
 from transformers.models.qwen2.modeling_qwen2 import Qwen2RMSNorm
 
-class Qwrky7Model(nn.Module):
+class Qwerky7Model(nn.Module):
     '''
-    Qwrky7 Model architecture
+    Qwerky7 Model architecture
     Simplified implementation
 
     Note: This EXCLUDES the head layer, keeping in line with the HF format convention
     '''
 
-    def __init__(self, config: Union[Qwrky7ConfigMap, any, None] = None):
+    def __init__(self, config: Union[Qwerky7ConfigMap, any, None] = None):
         # Initialize the base class
         super().__init__()
 
         # Normalize the config
-        configMap:Qwrky7ConfigMap = Qwrky7ConfigMap.normalize(config)
+        configMap:Qwerky7ConfigMap = Qwerky7ConfigMap.normalize(config)
         self.configMap = configMap
 
         # Get the required prop
@@ -38,7 +38,7 @@ class Qwrky7Model(nn.Module):
 
         # main layers
         self.layers = nn.ModuleList(
-            [Qwrky7LayerBlock(config.new_block_config_map(layer_id=layer_idx)) for layer_idx in range(config.num_hidden_layers)]
+            [Qwerky7LayerBlock(config.new_block_config_map(layer_id=layer_idx)) for layer_idx in range(config.num_hidden_layers)]
         )
 
         # ln_out
@@ -251,7 +251,7 @@ class Qwrky7Model(nn.Module):
         return x_hidden_state, ret_stateList
         
     def _forward_layer_hook(self, 
-            layer:Qwrky7LayerBlock, 
+            layer:Qwerky7LayerBlock, 
             x_hidden_state:torch.Tensor, 
             prv_stateList:list[torch.Tensor], 
             v_first:torch.Tensor

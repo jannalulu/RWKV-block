@@ -4,14 +4,14 @@ from typing import Union, Tuple
 
 from ...v7_goose.block.rwkv7_layer_block import RWKV7LayerBlock
 from ...v7_goose.block.rwkv7_block_config_map import RWKV7BlockConfigMap
-from .qwrky7_time_mix import Qwrky7TimeMix
-from .qwrky7_block_config_map import Qwrky7BlockConfigMap
+from .qwerky7_time_mix import Qwerky7TimeMix
+from .qwerky7_block_config_map import Qwerky7BlockConfigMap
 
 from transformers.models.qwen2.modeling_qwen2 import Qwen2RMSNorm, Qwen2MLP
 from dataclasses import dataclass
 
 @dataclass
-class Qwrky7Qwen2MLPConfig:
+class Qwerky7Qwen2MLPConfig:
     '''
     Simple dataclass, to comply with Qwen2MLP config requirements
     '''
@@ -19,15 +19,15 @@ class Qwrky7Qwen2MLPConfig:
     intermediate_size: int
     hidden_act: str ="silu"
 
-class Qwrky7LayerBlock(torch.nn.Module):
+class Qwerky7LayerBlock(torch.nn.Module):
     def __init__(
             self, 
-            configMap: Union[Qwrky7BlockConfigMap, RWKV7BlockConfigMap, any]
+            configMap: Union[Qwerky7BlockConfigMap, RWKV7BlockConfigMap, any]
         ):
         super().__init__()
 
         # The configMap to use
-        configMap = Qwrky7BlockConfigMap.normalize(configMap)
+        configMap = Qwerky7BlockConfigMap.normalize(configMap)
         self.configMap = configMap
 
         # Get required props
@@ -38,10 +38,10 @@ class Qwrky7LayerBlock(torch.nn.Module):
 
         # Setup the modules
         self.input_layernorm = Qwen2RMSNorm(hidden_size, rms_norm_eps).to(device, dtype=dtype)
-        self.self_attn = Qwrky7TimeMix(configMap)
+        self.self_attn = Qwerky7TimeMix(configMap)
 
         self.post_attention_layernorm = Qwen2RMSNorm(hidden_size, eps=rms_norm_eps).to(device, dtype=dtype)
-        self.mlp = Qwen2MLP(Qwrky7Qwen2MLPConfig(
+        self.mlp = Qwen2MLP(Qwerky7Qwen2MLPConfig(
             hidden_size = hidden_size,
             intermediate_size = configMap.get_hidden_size_ffn()
         )).to(device, dtype=dtype)

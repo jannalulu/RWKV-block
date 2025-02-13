@@ -3,10 +3,10 @@ from typing import Optional
 from typing import Union
 import torch
 
-from ..block.qwrky7_block_config_map import Qwrky7BlockConfigMap
+from ..block.qwerky7_block_config_map import Qwerky7BlockConfigMap
 
 @dataclass
-class Qwrky7ConfigMap(Qwrky7BlockConfigMap):
+class Qwerky7ConfigMap(Qwerky7BlockConfigMap):
     # This is the world tokenizer size
     vocab_size: int = 152064 
     init_state_wkv: bool = False
@@ -35,23 +35,23 @@ class Qwrky7ConfigMap(Qwrky7BlockConfigMap):
         super().__init__(num_hidden_layers=num_hidden_layers, hidden_size=hidden_size, **kwargs)
         
     @staticmethod
-    def normalize(config_map: any) -> 'Qwrky7ConfigMap':
+    def normalize(config_map: any) -> 'Qwerky7ConfigMap':
         '''
         Converts either maps, objs or configmaps
         '''
-        if isinstance(config_map, Qwrky7ConfigMap):
+        if isinstance(config_map, Qwerky7ConfigMap):
             return config_map
         
         if isinstance(config_map, dict):
-            return Qwrky7ConfigMap(**config_map)
+            return Qwerky7ConfigMap(**config_map)
 
         if hasattr(config_map, '__dict__'):
-            return Qwrky7ConfigMap(**config_map.__dict__)
+            return Qwerky7ConfigMap(**config_map.__dict__)
         
         raise ValueError(f"Unsupported config_map type: {type(config_map)}")
 
     @staticmethod
-    def from_model_state_dict(state_dict: dict, **kwargs) -> 'Qwrky7ConfigMap':
+    def from_model_state_dict(state_dict: dict, **kwargs) -> 'Qwerky7ConfigMap':
         '''
         Converts the state dict to the config map
         '''
@@ -68,7 +68,7 @@ class Qwrky7ConfigMap(Qwrky7BlockConfigMap):
             kwargs['init_state_wkv'] = True
         
         # Initialize the config map, with the configured values
-        return Qwrky7ConfigMap(
+        return Qwerky7ConfigMap(
             num_hidden_layers=num_hidden_layers,
             hidden_size=state_dict['model.embed_tokens.weight'].shape[1],
             vocab_size=state_dict['model.embed_tokens.weight'].shape[0],

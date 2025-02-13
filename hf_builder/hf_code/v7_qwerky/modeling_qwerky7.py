@@ -1,4 +1,4 @@
-""" Qwrky Modeling"""
+""" Qwerky Modeling"""
 
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import (
@@ -24,18 +24,18 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple, Union, Any
 
 # Load the config and model
-from .configuration_qwrky7 import Qwrky7Config
-from .modeling_blocks_qwrky7 import Qwrky7Model as RwkvBlockQwrky7Model
+from .configuration_qwerky7 import Qwerky7Config
+from .modeling_blocks_qwerky7 import Qwerky7Model as RwkvBlockQwerky7Model
 
-class Qwrky7State(Cache):
+class Qwerky7State(Cache):
     '''
-    HF Cache API implementation for qwrky7
+    HF Cache API implementation for qwerky7
     To speed up inference time by "reusing" KV cache's as a means of "state"
     '''
     def __init__(self) -> None:
         super().__init__()
         self._seen_tokens = 0  # Used in `generate` to keep tally of how many tokens the cache has seen
-        self.qwrky_state: List[torch.Tensor] = []
+        self.qwerky_state: List[torch.Tensor] = []
 
     def __getitem__(self, layer_idx: int):
         """
@@ -43,7 +43,7 @@ class Qwrky7State(Cache):
         sequence length.
         """
         if layer_idx < len(self):
-            return self.qwrky_state[layer_idx]
+            return self.qwerky_state[layer_idx]
         else:
             raise KeyError(f"Cache only has {len(self)} layers, attempted to access layer with index {layer_idx}")
 
@@ -53,14 +53,14 @@ class Qwrky7State(Cache):
         keys and values
         """
         for layer_idx in range(len(self)):
-            yield self.qwrky_state[layer_idx]
+            yield self.qwerky_state[layer_idx]
 
     def __len__(self):
         """
         Support for backwards-compatible `past_key_value` length, e.g. `len(past_key_value)`. This value corresponds
         to the number of layers in the model.
         """
-        return len(self.qwrky_state)
+        return len(self.qwerky_state)
 
     def get_usable_length(self, new_seq_length: int, layer_idx: Optional[int] = 0) -> int:
         """Given the sequence length of the new inputs, returns the usable length of the cache."""
@@ -92,7 +92,7 @@ class Qwrky7State(Cache):
     @torch.no_grad
     def update(
         self,
-        layer_qwrky_state: torch.Tensor,
+        layer_qwerky_state: torch.Tensor,
         token_count: int,
         layer_idx: int,
         cache_kwargs: Optional[Dict[str, Any]] = None,
@@ -103,31 +103,31 @@ class Qwrky7State(Cache):
 
         # Update the cache
         # There may be skipped layers, fill them with empty lists
-        for _ in range(len(self.qwrky_state), layer_idx + 1):
-            self.qwrky_state.append([
-                layer_qwrky_state
+        for _ in range(len(self.qwerky_state), layer_idx + 1):
+            self.qwerky_state.append([
+                layer_qwerky_state
             ])
 
         # Check the batch sizing matches, reset the cache on mismatch
-        batch_size = layer_qwrky_state.shape[0]
-        if batch_size != self.qwrky_state[layer_idx].shape[0]:
-            self.qwrky_state[layer_idx] = torch.zeros_like(layer_qwrky_state)
+        batch_size = layer_qwerky_state.shape[0]
+        if batch_size != self.qwerky_state[layer_idx].shape[0]:
+            self.qwerky_state[layer_idx] = torch.zeros_like(layer_qwerky_state)
 
         # Update the cache
-        self.qwrky_state[layer_idx].copy_(layer_qwrky_state)
+        self.qwerky_state[layer_idx].copy_(layer_qwerky_state)
 
         # Return the updated cache
-        return self.qwrky_state[layer_idx]
+        return self.qwerky_state[layer_idx]
 
-class Qwrky7PreTrainedModel(PreTrainedModel):
+class Qwerky7PreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained models.
     """
-    config_class = Qwrky7Config
+    config_class = Qwerky7Config
     
     base_model_prefix = "model"
     is_parallelizable = True
-    _no_split_modules = ["Qwrky7LayerBlock"]
+    _no_split_modules = ["Qwerky7LayerBlock"]
     _keep_in_fp32_modules = []
 
     # Enable cacching of k/v's
@@ -140,7 +140,7 @@ class Qwrky7PreTrainedModel(PreTrainedModel):
     supports_gradient_checkpointing = True
     gradient_checkpointing = True
 
-    def __init__(self, config: Qwrky7Config=None):
+    def __init__(self, config: Qwerky7Config=None):
         # Work around for multiple inheritance
         if config is None and self.config is not None:
             config = self.config
@@ -185,14 +185,14 @@ class Qwrky7PreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(module.weight, mean=0.0, std=initializer_range)
 
-            # # Qwrky does not use a blank pad idx. The pad_idx is a training token
+            # # Qwerky does not use a blank pad idx. The pad_idx is a training token
             # if module.padding_idx is not None:
             #     module.weight.data[module.padding_idx].zero_()
 
 @dataclass
-class Qwrky7Output(ModelOutput):
+class Qwerky7Output(ModelOutput):
     """
-    Class for the Qwrky model outputs.
+    Class for the Qwerky model outputs.
     Args:
         last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
             Sequence of hidden-states at the output of the last layer of the model.
@@ -209,14 +209,14 @@ class Qwrky7Output(ModelOutput):
             the self-attention heads.
     """
     last_hidden_state: torch.FloatTensor = None
-    qwrky_state: Optional[list[torch.Tensor]] = None
+    qwerky_state: Optional[list[torch.Tensor]] = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
-    past_key_values: Optional[Qwrky7State] = None
+    past_key_values: Optional[Qwerky7State] = None
 
 
 @dataclass
-class Qwrky7CausalLMOutput(ModelOutput):
+class Qwerky7CausalLMOutput(ModelOutput):
     """
     Base class for causal language model (or autoregressive) outputs.
     Args:
@@ -238,12 +238,12 @@ class Qwrky7CausalLMOutput(ModelOutput):
     """
     loss: Optional[torch.FloatTensor] = None
     logits: torch.FloatTensor = None
-    qwrky_state: Optional[list[torch.Tensor]] = None
+    qwerky_state: Optional[list[torch.Tensor]] = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
-    past_key_values: Optional[Qwrky7State] = None
+    past_key_values: Optional[Qwerky7State] = None
 
-QWRKY7_START_DOCSTRING = r"""
+QWERKY7_START_DOCSTRING = r"""
     This model inherits from [`PreTrainedModel`]. Check the superclass documentation for the generic methods the
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.) This model is also a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module)
@@ -255,7 +255,7 @@ QWRKY7_START_DOCSTRING = r"""
             configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
 """
 
-Qwrky7_INPUTS_DOCSTRING = r"""
+Qwerky7_INPUTS_DOCSTRING = r"""
     Args:
         input_ids (`torch.LongTensor` of shape `(batch_size, input_ids_length)`):
             `input_ids_length` = `sequence_length` if `past_key_values` is `None` else
@@ -274,7 +274,7 @@ Qwrky7_INPUTS_DOCSTRING = r"""
             is useful if you want more control over how to convert `input_ids` indices into associated vectors than the
             model's internal embedding lookup matrix.
         
-        state (List block states, representing the Qwrky various internal states per layer `(batch_size, hidden_state)`, *optional*):
+        state (List block states, representing the Qwerky various internal states per layer `(batch_size, hidden_state)`, *optional*):
             If passed along, the model uses the previous state in all the blocks (which will give the output for the
             `input_ids` provided as if the model add `state_input_ids + input_ids` as context).
 
@@ -292,16 +292,16 @@ Qwrky7_INPUTS_DOCSTRING = r"""
 """
 
 @add_start_docstrings(
-    "The bare Qwrky7 Model transformer outputting raw hidden-states without activating the head (variable is still declared)",
-    QWRKY7_START_DOCSTRING,
+    "The bare Qwerky7 Model transformer outputting raw hidden-states without activating the head (variable is still declared)",
+    QWERKY7_START_DOCSTRING,
 )
-class Qwrky7BaseModel(RwkvBlockQwrky7Model, Qwrky7PreTrainedModel):
-    def __init__(self, config: Qwrky7Config):
+class Qwerky7BaseModel(RwkvBlockQwerky7Model, Qwerky7PreTrainedModel):
+    def __init__(self, config: Qwerky7Config):
         # Work around for multiple inheritance
         self.config = config
         super().__init__(config)
-        # Qwrky7GooseModel.__init__(self,config)
-        # Qwrky7PreTrainedModel.__init__(self,config)
+        # Qwerky7GooseModel.__init__(self,config)
+        # Qwerky7PreTrainedModel.__init__(self,config)
     
     def get_input_embeddings(self):
         return self.emb
@@ -313,9 +313,9 @@ class Qwrky7BaseModel(RwkvBlockQwrky7Model, Qwrky7PreTrainedModel):
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
 
-    @add_start_docstrings_to_model_forward(Qwrky7_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(Qwerky7_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        output_type=Qwrky7Output,
+        output_type=Qwerky7Output,
     )
     def forward(
         self,
@@ -324,17 +324,17 @@ class Qwrky7BaseModel(RwkvBlockQwrky7Model, Qwrky7PreTrainedModel):
         position_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         past_key_values: Optional[Cache] = None,
-        qwrky_state: Optional[list[torch.Tensor]] = None,
+        qwerky_state: Optional[list[torch.Tensor]] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None, # does nothing
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         **kwargs
-    ) -> Union[Tuple, Qwrky7Output]:
+    ) -> Union[Tuple, Qwerky7Output]:
         '''
-        Forward with input_ids, and the qwrky_state
-        To get the output hidden state (not logits), and the next qwrky_state
+        Forward with input_ids, and the qwerky_state
+        To get the output hidden state (not logits), and the next qwerky_state
         '''
         
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
@@ -343,7 +343,7 @@ class Qwrky7BaseModel(RwkvBlockQwrky7Model, Qwrky7PreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if output_attentions:
-            warnings.warning_once("`Qwrky7Model` does not `output_attentions` now, setting it to `False`.")
+            warnings.warning_once("`Qwerky7Model` does not `output_attentions` now, setting it to `False`.")
             output_attentions = False
         
         if self.gradient_checkpointing and self.training and use_cache:
@@ -355,7 +355,7 @@ class Qwrky7BaseModel(RwkvBlockQwrky7Model, Qwrky7PreTrainedModel):
             use_cache = False
 
         if output_hidden_states:
-            warnings.warning_once("`Qwrky7Model` does not `output_hidden_states` now, setting it to `False`.")
+            warnings.warning_once("`Qwerky7Model` does not `output_hidden_states` now, setting it to `False`.")
             output_hidden_states = False
 
         # ---
@@ -376,21 +376,21 @@ class Qwrky7BaseModel(RwkvBlockQwrky7Model, Qwrky7PreTrainedModel):
         # ---
 
         # Initialize the cache if needed
-        if use_cache and not isinstance(past_key_values, Qwrky7State):
-            past_key_values = Qwrky7State()
-            past_key_values.qwrky_state = self.get_init_state(batch_size=batch_size)
+        if use_cache and not isinstance(past_key_values, Qwerky7State):
+            past_key_values = Qwerky7State()
+            past_key_values.qwerky_state = self.get_init_state(batch_size=batch_size)
 
-        # Get the qwrky_state / prv_stateList
-        # Uses the given qwrky_state if given
+        # Get the qwerky_state / prv_stateList
+        # Uses the given qwerky_state if given
         # (high priority over the past_key_values cache)
-        if qwrky_state is None:
+        if qwerky_state is None:
             # From the cache if provided, and if caching is enabled
             if past_key_values is not None and use_cache:
-                qwrky_state = past_key_values.qwrky_state
+                qwerky_state = past_key_values.qwerky_state
             
-            # No cache, no qwrky_state, initialize a new one
-            qwrky_state = self.get_init_state(batch_size=batch_size)
-        prv_stateList = qwrky_state
+            # No cache, no qwerky_state, initialize a new one
+            qwerky_state = self.get_init_state(batch_size=batch_size)
+        prv_stateList = qwerky_state
 
         # Initialize the ret_stateList
         ret_stateList = self.get_init_state(batch_size=batch_size, skip_init_state=True)
@@ -423,13 +423,13 @@ class Qwrky7BaseModel(RwkvBlockQwrky7Model, Qwrky7PreTrainedModel):
         # ---
 
         # Block forward, with gradient if needed
-        def layer_forward(layer, in_x_state, in_qwrky_state, in_v_first):
+        def layer_forward(layer, in_x_state, in_qwerky_state, in_v_first):
             if self.gradient_checkpointing and self.training:
                 return self._gradient_checkpointing_func(
-                    layer.__call__, in_x_state, in_qwrky_state, in_v_first
+                    layer.__call__, in_x_state, in_qwerky_state, in_v_first
                 )
             else:
-                return layer(in_x_state, in_qwrky_state, in_v_first)
+                return layer(in_x_state, in_qwerky_state, in_v_first)
         
         # Lets start iterating the layers
         # ----------------------------------------------------------------------------
@@ -490,10 +490,10 @@ class Qwrky7BaseModel(RwkvBlockQwrky7Model, Qwrky7PreTrainedModel):
             all_hidden_states += (x_hidden_state,)
 
         if not return_dict:
-            return tuple(i for i in [x_hidden_state, qwrky_state, all_hidden_states, all_attns] if i is not None)
-        return Qwrky7Output(
+            return tuple(i for i in [x_hidden_state, qwerky_state, all_hidden_states, all_attns] if i is not None)
+        return Qwerky7Output(
             last_hidden_state=x_hidden_state,
-            qwrky_state=qwrky_state,
+            qwerky_state=qwerky_state,
             hidden_states=all_hidden_states,
             attentions=all_attns,
             past_key_values=past_key_values
@@ -501,16 +501,16 @@ class Qwrky7BaseModel(RwkvBlockQwrky7Model, Qwrky7PreTrainedModel):
 
 # @add_start_docstrings(
 #     """
-#     The Qwrky Model transformer with a language modeling head on top (linear layer with weights tied to the input
+#     The Qwerky Model transformer with a language modeling head on top (linear layer with weights tied to the input
 #     embeddings).
 #     """,
-#     QWRKY7_START_DOCSTRING,
+#     QWERKY7_START_DOCSTRING,
 # )
-class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
+class Qwerky7ForCausalLM(Qwerky7PreTrainedModel, GenerationMixin):
 
     def __init__(self, config):
         super().__init__(config)
-        self.model = Qwrky7BaseModel(config)
+        self.model = Qwerky7BaseModel(config)
 
         dtype=self.model.embed_tokens.weight.dtype
         device=self.model.embed_tokens.weight.device
@@ -524,10 +524,10 @@ class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
         attention_mask: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         past_key_values: Optional[Cache] = None,
-        qwrky_state: Optional[list[torch.Tensor]] = None,
+        qwerky_state: Optional[list[torch.Tensor]] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        # num_new_tokens_if_qwrky_state: int = 1, # Only triggers if given input_ids + qwrky_state
+        # num_new_tokens_if_qwerky_state: int = 1, # Only triggers if given input_ids + qwerky_state
         num_logits_to_keep: Optional[int] = None,
         **kwargs
     ):
@@ -539,8 +539,8 @@ class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
         `_update_model_kwargs_for_generation` function instead?
         '''
         # # only last token for `inputs_ids` if the `past_key_values` is passed along.
-        # if qwrky_state is not None and input_ids is not None:
-        #     input_ids = input_ids[:, -num_new_tokens_if_qwrky_state:]
+        # if qwerky_state is not None and input_ids is not None:
+        #     input_ids = input_ids[:, -num_new_tokens_if_qwerky_state:]
         
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
         if inputs_embeds is not None:
@@ -566,16 +566,16 @@ class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
         # ---
 
         # Initialize the cache if needed
-        if use_cache and not isinstance(past_key_values, Qwrky7State):
-            past_key_values = Qwrky7State()
-            past_key_values.qwrky_state = self.model.get_init_state(batch_size=batch_size)
+        if use_cache and not isinstance(past_key_values, Qwerky7State):
+            past_key_values = Qwerky7State()
+            past_key_values.qwerky_state = self.model.get_init_state(batch_size=batch_size)
 
         if num_logits_to_keep is not None:
             model_inputs['num_logits_to_keep'] = num_logits_to_keep
 
         model_inputs.update({
             'past_key_values': past_key_values,
-            'qwrky_state': qwrky_state,
+            'qwerky_state': qwerky_state,
             'use_cache': use_cache,
             'attention_mask': attention_mask,
             'num_logits_to_keep': num_logits_to_keep,
@@ -591,16 +591,16 @@ class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
         # Get the past_key_values from the outputs
         past_key_values = outputs.get("past_key_values", None)
         if past_key_values is not None:
-            qwrky_state = past_key_values.qwrky_state
+            qwerky_state = past_key_values.qwerky_state
         else:
-            qwrky_state = outputs.get("qwrky_state", model_kwargs.get("qwrky_state", None))
+            qwerky_state = outputs.get("qwerky_state", model_kwargs.get("qwerky_state", None))
         
-        # Prefer the output qwrky_state, if provided
+        # Prefer the output qwerky_state, if provided
         input_ids = model_kwargs.get("input_ids", None)
         attention_mask = model_kwargs.get("attention_mask", None)
 
         # only last token for inputs_ids if the state is passed along.
-        if qwrky_state is not None and input_ids is not None and num_new_tokens > 0:
+        if qwerky_state is not None and input_ids is not None and num_new_tokens > 0:
             input_ids = input_ids[:, -num_new_tokens:]
             model_kwargs["input_ids"] = input_ids
 
@@ -611,9 +611,9 @@ class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
         # Return the formated output
         return model_kwargs
     
-    # @add_start_docstrings_to_model_forward(Qwrky7_INPUTS_DOCSTRING)
+    # @add_start_docstrings_to_model_forward(Qwerky7_INPUTS_DOCSTRING)
     # @add_code_sample_docstrings(
-    #     output_type=Qwrky7CausalLMOutput,
+    #     output_type=Qwerky7CausalLMOutput,
     # )
     def forward(
         self,
@@ -623,14 +623,14 @@ class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
-        qwrky_state: Optional[list[torch.Tensor]] = None,
+        qwerky_state: Optional[list[torch.Tensor]] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         **kwargs
-    ) -> Union[Tuple, Qwrky7CausalLMOutput]:
+    ) -> Union[Tuple, Qwerky7CausalLMOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for language modeling. Note that the labels **are shifted** inside the model, i.e. you can set
@@ -645,7 +645,7 @@ class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
             position_ids=position_ids,
             inputs_embeds=inputs_embeds, 
             past_key_values=past_key_values, 
-            qwrky_state=qwrky_state, 
+            qwerky_state=qwerky_state, 
             use_cache=use_cache, 
             cache_position=cache_position,
             output_attentions=output_attentions, 
@@ -653,9 +653,9 @@ class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
             return_dict=False
         )
 
-        # Get the hidden state, and the updated Qwrky state
+        # Get the hidden state, and the updated Qwerky state
         hidden_states = rwkv_outputs[0]
-        qwrky_state = rwkv_outputs[1]
+        qwerky_state = rwkv_outputs[1]
 
         # Get the ALL hidden states and attentions dumps
         all_hidden_states = rwkv_outputs[2] if output_hidden_states else None
@@ -690,15 +690,15 @@ class Qwrky7ForCausalLM(Qwrky7PreTrainedModel, GenerationMixin):
                 loss = F.cross_entropy(shift_logits.view(-1, shift_labels.size(-1)), shift_labels.view(-1), reduction="mean")
 
         if not return_dict:
-            return tuple(i for i in [loss, logits, qwrky_state, all_hidden_states, all_attns] if i is not None)
+            return tuple(i for i in [loss, logits, qwerky_state, all_hidden_states, all_attns] if i is not None)
         
-        return Qwrky7CausalLMOutput(
+        return Qwerky7CausalLMOutput(
             loss=loss,
             logits=logits,
-            qwrky_state=qwrky_state,
+            qwerky_state=qwerky_state,
             hidden_states=all_hidden_states,
             attentions=all_attns,
             past_key_values=past_key_values
         )
 
-__all__ = ["Qwrky7ForCausalLM", "Qwrky7BaseModel", "Qwrky7PreTrainedModel"]
+__all__ = ["Qwerky7ForCausalLM", "Qwerky7BaseModel", "Qwerky7PreTrainedModel"]

@@ -86,9 +86,9 @@ def build_v7_goose():
         build_file_name="modeling_blocks_rwkv7.py"
     )
 
-def build_v7_qwrky():
+def build_v7_qwerky():
     hf_script_builder(
-        target_dir=f"{current_dir}/hf_code/v7_qwrky",
+        target_dir=f"{current_dir}/hf_code/v7_qwerky",
         source_dir=f"{current_dir}/../rwkv_block/v7_goose",
         source_cuda_dir=f"{current_dir}/../rwkv_block/v7_goose/block/kernel/cuda",
         build_file_order = [
@@ -102,14 +102,14 @@ def build_v7_qwrky():
             "block/rwkv7_layer_block.py",
             # "model/rwkv7_goose_config_map.py",
             # "model/rwkv7_goose_model.py",
-            "../v7_qwrky/block/qwrky7_block_config_map.py",
-            "../v7_qwrky/block/qwrky7_layer_block.py",
-            "../v7_qwrky/block/qwrky7_time_mix.py",
-            "../v7_qwrky/model/qwrky7_config_map.py",
-            "../v7_qwrky/model/qwrky7_model.py",
-            "../v7_qwrky/model/qwrky7_causal_lm.py",
+            "../v7_qwerky/block/qwerky7_block_config_map.py",
+            "../v7_qwerky/block/qwerky7_layer_block.py",
+            "../v7_qwerky/block/qwerky7_time_mix.py",
+            "../v7_qwerky/model/qwerky7_config_map.py",
+            "../v7_qwerky/model/qwerky7_model.py",
+            "../v7_qwerky/model/qwerky7_causal_lm.py",
         ],
-        build_file_name="modeling_blocks_qwrky7.py"
+        build_file_name="modeling_blocks_qwerky7.py"
     )
 
 def hf_script_builder(
@@ -249,8 +249,8 @@ def hf_builder(args):
     print("Building rwkv_block into HF code ...")
     if model_class == "v7_goose":
         build_v7_goose()
-    elif model_class == "v7_qwrky":
-        build_v7_qwrky()
+    elif model_class == "v7_qwerky":
+        build_v7_qwerky()
     else:
         raise ValueError(f"Unsupported model class: {model_class}")
 
@@ -263,9 +263,9 @@ def hf_builder(args):
     if model_class == "v7_goose":
         from hf_code.v7_goose.configuration_rwkv7 import RWKV7Config
         model_config = RWKV7Config.from_model_state_dict(state_dict)
-    elif model_class == "v7_qwrky":
-        from hf_code.v7_qwrky.configuration_qwrky7 import Qwrky7Config
-        model_config = Qwrky7Config.from_model_state_dict(state_dict)
+    elif model_class == "v7_qwerky":
+        from hf_code.v7_qwerky.configuration_qwerky7 import Qwerky7Config
+        model_config = Qwerky7Config.from_model_state_dict(state_dict)
     else:
         raise ValueError(f"Unsupported model class: {model_class}")
     
@@ -279,9 +279,9 @@ def hf_builder(args):
     if model_class == "v7_goose":
         from hf_code.v7_goose.modeling_rwkv7 import RWKV7Model
         model_instance = RWKV7Model(model_config)
-    elif model_class == "v7_qwrky":
-        from hf_code.v7_qwrky.modeling_qwrky7 import Qwrky7ForCausalLM
-        model_instance = Qwrky7ForCausalLM(model_config)
+    elif model_class == "v7_qwerky":
+        from hf_code.v7_qwerky.modeling_qwerky7 import Qwerky7ForCausalLM
+        model_instance = Qwerky7ForCausalLM(model_config)
     else:
         raise ValueError(f"Unsupported model class: {model_class}")
 
@@ -347,13 +347,13 @@ def hf_builder(args):
             "AutoModelForCausalLM": "modeling_rwkv7.RWKV7ForCausalLM"
         }
         config_json["architectures"] = ["RWKV7ForCausalLM", "RWKV7Model", "RWKV7PreTrainedModel"]
-    elif model_class == "v7_qwrky":
+    elif model_class == "v7_qwerky":
         config_json["auto_map"] = {
-            "AutoConfig": "configuration_qwrky7.Qwrky7Config",
-            "AutoModel": "modeling_qwrky7.Qwrky7BaseModel",
-            "AutoModelForCausalLM": "modeling_qwrky7.Qwrky7ForCausalLM"
+            "AutoConfig": "configuration_qwerky7.Qwerky7Config",
+            "AutoModel": "modeling_qwerky7.Qwerky7BaseModel",
+            "AutoModelForCausalLM": "modeling_qwerky7.Qwerky7ForCausalLM"
         }
-        config_json["architectures"] = ["Qwrky7ForCausalLM", "Qwrky7BaseModel", "Qwrky7PreTrainedModel"]
+        config_json["architectures"] = ["Qwerky7ForCausalLM", "Qwerky7BaseModel", "Qwerky7PreTrainedModel"]
     else:
         raise ValueError(f"Unsupported model class: {model_class}")
 

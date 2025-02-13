@@ -5,11 +5,11 @@ from transformers.configuration_utils import PretrainedConfig
 # logger = logging.get_logger(__name__)
 
 # Import the dependencies
-from .modeling_blocks_qwrky7 import Qwrky7ConfigMap as RwkvBlockQwrky7ConfigMap, Qwrky7BlockConfigMap
+from .modeling_blocks_qwerky7 import Qwerky7ConfigMap as RwkvBlockQwerky7ConfigMap, Qwerky7BlockConfigMap
 
-class Qwrky7Config(PretrainedConfig):
+class Qwerky7Config(PretrainedConfig):
     """
-    This is the configuration class to store the configuration of a [`Qwrky7Model`]. It is used to instantiate a RWKV7
+    This is the configuration class to store the configuration of a [`Qwerky7Model`]. It is used to instantiate a RWKV7
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
     defaults will yield a similar configuration to that of the RWVK-7
 
@@ -19,7 +19,7 @@ class Qwrky7Config(PretrainedConfig):
     Args:
         vocab_size (`int`, *optional*, defaults to 65536):
             Vocabulary size of the RWKV7 model. Defines the number of different tokens that can be represented by the
-            `inputs_ids` passed when calling [`Qwrky7Model`].
+            `inputs_ids` passed when calling [`Qwerky7Model`].
         num_hidden_layers (`int`, *optional*, defaults to 24):
             Number of hidden layers in the model.
         hidden_size (`int`, *optional*, defaults to 768):
@@ -57,19 +57,19 @@ class Qwrky7Config(PretrainedConfig):
     Example:
 
     ```python
-    >>> from transformers import Qwrky7Config, Qwrky7Model
+    >>> from transformers import Qwerky7Config, Qwerky7Model
 
     >>> # Initializing a Rwkv7 configuration
-    >>> configuration = Qwrky7Config()
+    >>> configuration = Qwerky7Config()
 
     >>> # Initializing a model (with random weights) from the configuration
-    >>> model = Qwrky7Model(configuration)
+    >>> model = Qwerky7Model(configuration)
 
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
 
-    model_type = "qwrky7"
+    model_type = "qwerky7"
 
     def __init__(
         self,
@@ -137,19 +137,19 @@ class Qwrky7Config(PretrainedConfig):
 
     @staticmethod
     def from_model_state_dict(state_dict: dict, **kwargs):
-        base_config = RwkvBlockQwrky7ConfigMap.from_model_state_dict(state_dict)
+        base_config = RwkvBlockQwerky7ConfigMap.from_model_state_dict(state_dict)
         # Join dictionary with **goose_config.__dict__ and **kwargs
-        return Qwrky7Config(**{**base_config.__dict__, **kwargs})
+        return Qwerky7Config(**{**base_config.__dict__, **kwargs})
     
-    def new_block_config_map(self, **kwargs) -> 'Qwrky7BlockConfigMap':
+    def new_block_config_map(self, **kwargs) -> 'Qwerky7BlockConfigMap':
         '''
         Returns a new config map with updated values
         '''
 
         new_dict = {}
-        for key in Qwrky7BlockConfigMap.__dataclass_fields__:
+        for key in Qwerky7BlockConfigMap.__dataclass_fields__:
             if key in self.__dict__:
                 new_dict[key] = self.__dict__[key]
         new_dict.update(kwargs)
 
-        return Qwrky7BlockConfigMap(**new_dict)
+        return Qwerky7BlockConfigMap(**new_dict)
