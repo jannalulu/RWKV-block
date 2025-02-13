@@ -7,17 +7,17 @@ from torch import nn
 from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb
 
 from ...v7_goose.block.rwkv7_time_mix import RWKV7TimeMix, _run_tmix_backend, _has_fla, _has_triton, _has_cuda
-from .qwrky7_block_config_map import Qwrky7BlockConfigMap
+from .qwerky7_block_config_map import Qwerky7BlockConfigMap
 
-class Qwrky7TimeMix(torch.nn.Module):
+class Qwerky7TimeMix(torch.nn.Module):
     '''
-    Time Mix block for QWRKY V7
+    Time Mix block for QWERKY V7
     '''
 
-    def __init__(self, configMap: Union[Qwrky7BlockConfigMap, any]):
+    def __init__(self, configMap: Union[Qwerky7BlockConfigMap, any]):
         super().__init__()
 
-        configMap:Qwrky7BlockConfigMap = Qwrky7BlockConfigMap.normalize(configMap)
+        configMap:Qwerky7BlockConfigMap = Qwerky7BlockConfigMap.normalize(configMap)
         self.configMap = configMap
 
         # Get required props
@@ -70,7 +70,7 @@ class Qwrky7TimeMix(torch.nn.Module):
             D_GATE_LORA  = calc_lora_rank(0.8, 0.6)
 
             ####
-            # Yes, these are dropped for qwrky7
+            # Yes, these are dropped for qwerky7
             ####
             # self.x_r = nn.Parameter(torch.empty(1,1,hidden_size, device=device, dtype=dtype))
             # self.x_w = nn.Parameter(torch.empty(1,1,hidden_size, device=device, dtype=dtype))
@@ -331,7 +331,7 @@ class Qwrky7TimeMix(torch.nn.Module):
 
         # # Warn against CUDA backend
         # if tmix_backend == "cuda" and HEAD_SIZE != 64:
-        #     print(f"[WARNING] !!! CUDA backend has potential memory safety issues for qwrky for non-64 head sizes !!!")
+        #     print(f"[WARNING] !!! CUDA backend has potential memory safety issues for qwerky for non-64 head sizes !!!")
 
         # Apply the time mix backend
         xx = torch.empty_like(x, device=x.device, dtype=x.dtype)
@@ -342,7 +342,7 @@ class Qwrky7TimeMix(torch.nn.Module):
         # xx = torch.nn.functional.group_norm(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE).float(), num_groups=N_HEAD, weight=self.ln_x.weight.float(), bias=self.ln_x.bias.float(), eps = self.ln_x.eps).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE).to(dtype=x_dtype)
 
         # ---
-        # Intentionally removed for qwrky7
+        # Intentionally removed for qwerky7
         # ---
         # xx = xx + ((r.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*k.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*self.r_k).sum(dim=-1, keepdim=True) * v.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)).view(BATCH_SIZE,SEQ_LEN,IN_EMB_SIZE)
         

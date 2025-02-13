@@ -3,23 +3,30 @@ from torch import nn
 from torch import Tensor
 from typing import Union
 
-from .qwrky7_config_map import Qwrky7ConfigMap
-from ..block.qwrky7_layer_block import Qwrky7LayerBlock
-from .qwrky7_model import Qwrky7Model
+from .qwerky7_config_map import Qwerky7ConfigMap
+from ..block.qwerky7_layer_block import Qwerky7LayerBlock
+from .qwerky7_model import Qwerky7Model
 
-class Qwrky7CausalLM(nn.Module):
-    def __init__(self, config: Union[Qwrky7ConfigMap, any]):
+class Qwerky7CausalLM(nn.Module):
+    def __init__(self, config: Union[Qwerky7ConfigMap, any]):
         super().__init__()
-        self.config = Qwrky7ConfigMap.normalize(config)
-        self.model = Qwrky7Model(self.config)
+        self.config = Qwerky7ConfigMap.normalize(config)
+        self.model = Qwerky7Model(self.config)
 
         device = self.config.get_device(None)
         dtype = self.config.get_dtype('bfloat16')
         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False).to(device, dtype=dtype)
 
+    def reset_parameters(self):
+        '''
+        Reset the parameters of the model, to an initial state used for training a model from scratch
+        '''
+        self.model.reset_parameters()
+        self.lm_head.reset_parameters()
+        
     def load_from_model_state_dict(self, state_dict: dict, non_blocking:bool=True):
         '''
-        Given the Full/partial qwrky model weights, loaded via `torch.load`
+        Given the Full/partial qwerky model weights, loaded via `torch.load`
         Setup the RWKV_TimeMix model weights, using the layer_id
         '''
         self.model.load_from_model_state_dict(state_dict, non_blocking=non_blocking)
