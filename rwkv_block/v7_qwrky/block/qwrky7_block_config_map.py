@@ -10,20 +10,21 @@ class Qwrky7BlockConfigMap(RWKV7BlockConfigMap):
 
     # RMS Norm eps
     rms_norm_eps: float = 1e-6
-    # Attention QKV bias
-    attention_bias: bool = True
-    # Attention output bias
-    attention_output_bias: bool = False
     # Qwrky headsize defaults to 128 (Not 64)
     head_size: int = 128
+
+    # # Attention QKV bias
+    # attention_bias: bool = True
+    # # Attention output bias
+    # attention_output_bias: bool = False
 
     def __init__(
         self, 
         num_hidden_layers: int,
         hidden_size: int,
         rms_norm_eps: float = 1e-6,
-        attention_bias: bool = True,
-        attention_output_bias: bool = False,
+        # attention_bias: bool = True,
+        # attention_output_bias: bool = False,
         head_size: int = 128,
         **kargs
     ):
@@ -32,8 +33,8 @@ class Qwrky7BlockConfigMap(RWKV7BlockConfigMap):
         And alias for hidden_size_mlp
         '''
         self.rms_norm_eps = rms_norm_eps
-        self.attention_bias = attention_bias
-        self.attention_output_bias = attention_output_bias
+        # self.attention_bias = attention_bias
+        # self.attention_output_bias = attention_output_bias
         super().__init__(num_hidden_layers, hidden_size, head_size=head_size, **kargs)
 
     

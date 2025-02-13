@@ -8,7 +8,7 @@ from ..block.qwrky7_block_config_map import Qwrky7BlockConfigMap
 @dataclass
 class Qwrky7ConfigMap(Qwrky7BlockConfigMap):
     # This is the world tokenizer size
-    vocab_size: int = 65536 
+    vocab_size: int = 152064 
     init_state_wkv: bool = False
     forward_chunk_size: int = 4096,
 
@@ -22,7 +22,7 @@ class Qwrky7ConfigMap(Qwrky7BlockConfigMap):
         self,
         num_hidden_layers: int,
         hidden_size: int,
-        vocab_size: int = 65536,
+        vocab_size: int = 152064,
         init_state_wkv: bool = False,
         forward_chunk_size: Optional[int] = 4096,
         padding_idx: int = 151643,
