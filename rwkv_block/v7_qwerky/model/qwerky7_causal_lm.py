@@ -17,6 +17,13 @@ class Qwerky7CausalLM(nn.Module):
         dtype = self.config.get_dtype('bfloat16')
         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False).to(device, dtype=dtype)
 
+    def reset_parameters(self):
+        '''
+        Reset the parameters of the model, to an initial state used for training a model from scratch
+        '''
+        self.model.reset_parameters()
+        self.lm_head.reset_parameters()
+        
     def load_from_model_state_dict(self, state_dict: dict, non_blocking:bool=True):
         '''
         Given the Full/partial qwerky model weights, loaded via `torch.load`
