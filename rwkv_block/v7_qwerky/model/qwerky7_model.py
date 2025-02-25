@@ -6,7 +6,7 @@ from typing import Union
 from .qwerky7_config_map import Qwerky7ConfigMap
 from ..block.qwerky7_layer_block import Qwerky7LayerBlock
 
-from transformers.models.qwen2.modeling_qwen2 import Qwen2RMSNorm
+from transformers.models.qwen2.modeling_qwen2 import Qwen2RMSNorm, Qwen2DecoderLayer, Qwen2RotaryEmbedding
 
 class Qwerky7Model(nn.Module):
     '''
@@ -23,7 +23,8 @@ class Qwerky7Model(nn.Module):
         # Normalize the config
         configMap:Qwerky7ConfigMap = Qwerky7ConfigMap.normalize(config)
         self.configMap = configMap
-
+        config = configMap
+        
         # Get the required prop
         num_hidden_layers = configMap.num_hidden_layers
         vocab_size = configMap.vocab_size
@@ -33,26 +34,45 @@ class Qwerky7Model(nn.Module):
         padding_idx = configMap.padding_idx
         head_size = configMap.head_size
 
-        # Embedding layer
-        self.embed_tokens = nn.Embedding(vocab_size, hidden_size, padding_idx).to(device, dtype=dtype)
+        # The following default device overwrite, is to speed up qwen related module initialization
+        default_device = torch.get_default_device()
+        default_dtype = torch.get_default_dtype()
+        torch.set_default_device(device)
+        torch.set_default_dtype(dtype)
 
-        # main layers
-        self.layers = nn.ModuleList(
-            [Qwerky7LayerBlock(config.new_block_config_map(layer_id=layer_idx)) for layer_idx in range(config.num_hidden_layers)]
-        )
+        with torch.device(device):
+            # Embedding layer
+            self.embed_tokens = nn.Embedding(vocab_size, hidden_size, padding_idx, dtype=dtype)
+            # Initialize rotary embeddings, which is used for all layers (both rwkv and qwerky)
+            self.rotary_emb = Qwen2RotaryEmbedding(config=config.hybrid_layer_config())
 
-        # ln_out
-        self.norm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps).to(device, dtype=dtype)
-        # self.rotary_emb = Qwen2RotaryEmbedding(config=config)
+            # main layers
+            self.layers = nn.ModuleList([
+                # Prefix hybrid layers
+                *[Qwen2DecoderLayer(config.hybrid_layer_config(), offset).bfloat16() for offset in range(config.num_prefix_hybrid_layers)],
+                # Qwerky layers
+                *[Qwerky7LayerBlock(config.new_block_config_map(layer_id=layer_idx)) for layer_idx in range(config.num_prefix_hybrid_layers, config.num_prefix_hybrid_layers + config.num_qwerky_layers())],
+                # Suffix hybrid layers
+                *[Qwen2DecoderLayer(config.hybrid_layer_config(), config.num_prefix_hybrid_layers + config.num_qwerky_layers() + offset).bfloat16() for offset in range(config.num_suffix_hybrid_layers)]
+            ])
 
-        # init state tuning support
-        if configMap.init_state_wkv:
-            stateTuneList = [None]*num_hidden_layers
-            for i in range(num_hidden_layers):
-                stateTuneList[i] = nn.ParameterDict({
-                    "wkv": nn.Parameter(torch.zeros(hidden_size // head_size, head_size, head_size, device=device, dtype=torch.float)),
-                })
-            self.init_state = nn.ParameterList(stateTuneList)
+            # ln_out
+            self.norm = Qwen2RMSNorm(config.hidden_size, eps=config.rms_norm_eps).to(dtype)
+            # self.norm.weight = nn.Parameter(torch.ones(hidden_size).bfloat16().to(device)) # Annoying HF meta device bug workaround
+
+            # init state tuning support (only for Qwerky layers, excluding hybrid layers)
+            if configMap.init_state_wkv:
+                n_qwerky_layers = configMap.num_qwerky_layers()
+                stateTuneList = [None]*n_qwerky_layers
+                for i in range(n_qwerky_layers):
+                    stateTuneList[i] = nn.ParameterDict({
+                        "wkv": nn.Parameter(torch.zeros(hidden_size // head_size, head_size, head_size, dtype=torch.float)),
+                    })
+                self.init_state = nn.ParameterList(stateTuneList)
+
+        # Reset the default device and dtype
+        torch.set_default_device(default_device)
+        torch.set_default_dtype(default_dtype)
 
     def reset_parameters(self):
         '''
@@ -67,31 +87,32 @@ class Qwerky7Model(nn.Module):
         hidden_size = configMap.hidden_size
         head_size = configMap.head_size
         
-        # Iterate and reset the layers
-        for i in range(num_hidden_layers):
-            self.layers[i].reset_parameters()
+        # With device
+        with torch.device(device):
+            # Iterate and reset the layers
+            for i in range(num_hidden_layers):
+                if hasattr(self.layers[i], 'reset_parameters'):
+                    self.layers[i].reset_parameters()
 
-        # Reinit the Embedding layer
-        self.embed_tokens.reset_parameters()
+            # Reinit the Embedding layer
+            self.embed_tokens.reset_parameters()
 
-        # Reinit the RMSNorm
-        self.norm.weight.data.fill_(1.0)
+            # Reinit the RMSNorm
+            self.norm.weight.data.fill_(1.0)
 
-        # if self.lm_head is not None:
-        #     self.lm_head.reset_parameters()
-
-        # Reinit the init state tuning support
-        if configMap.init_state_wkv:
-            if self.init_state is None:
-                stateTuneList = [None]*num_hidden_layers
-                for i in range(num_hidden_layers):
-                    stateTuneList[i] = nn.ParameterDict({
-                        "wkv": nn.Parameter(torch.zeros(hidden_size // head_size, head_size, head_size, device=device, dtype=torch.float)),
-                    })
-                self.init_state = nn.ParameterList(stateTuneList)
-            else:
-                for i in range(num_hidden_layers):
-                    self.init_state[i]["wkv"].data.copy_(torch.zeros(hidden_size // head_size, head_size, head_size, device=device, dtype=torch.float))
+            # Reinit the init state tuning support (only for Qwerky layers)
+            if configMap.init_state_wkv:
+                n_qwerky_layers = configMap.num_qwerky_layers()
+                if self.init_state is None:
+                    stateTuneList = [None]*n_qwerky_layers
+                    for i in range(n_qwerky_layers):
+                        stateTuneList[i] = nn.ParameterDict({
+                            "wkv": nn.Parameter(torch.zeros(hidden_size // head_size, head_size, head_size, dtype=torch.float)),
+                        })
+                    self.init_state = nn.ParameterList(stateTuneList)
+                else:
+                    for i in range(n_qwerky_layers):
+                        self.init_state[i]["wkv"].data.copy_(torch.zeros(hidden_size // head_size, head_size, head_size, dtype=torch.float))
 
 
     def load_from_model_state_dict(self, state_dict: dict, non_blocking:bool=True):
@@ -104,10 +125,10 @@ class Qwerky7Model(nn.Module):
 
         self.embed_tokens.weight.data.copy_(state_dict['model.embed_tokens.weight'], non_blocking=non_blocking)
         self.norm.weight.data.copy_(state_dict['model.norm.weight'], non_blocking=non_blocking)
-        # self.norm.bias.data.copy_(state_dict['model.norm.bias'], non_blocking=non_blocking)
         
         if self.configMap.init_state_wkv:
-            for i in range(self.configMap.num_hidden_layers):
+            n_qwerky_layers = self.configMap.num_qwerky_layers()
+            for i in range(n_qwerky_layers):
                 if 'model.init_state.'+str(i)+'.wkv' in state_dict:
                     self.init_state[i]["wkv"].data.copy_(state_dict['model.init_state.'+str(i)+'.wkv'], non_blocking=True)
 
@@ -124,13 +145,14 @@ class Qwerky7Model(nn.Module):
         # Get required configs
         hidden_size = self.configMap.hidden_size
         init_state_wkv = self.configMap.init_state_wkv
-        num_hidden_layers = self.configMap.num_hidden_layers
+        n_qwerky_layers = self.configMap.num_qwerky_layers()
         head_size = self.configMap.head_size
 
-        # Prepare the initial state
-        init_state = [ None for i in range(num_hidden_layers) ]
-        for i in range(num_hidden_layers):
-            device = self.layers[i].self_attn.q_proj.weight.data.device
+        # Prepare the initial state (only for Qwerky layers)
+        init_state = [ None for i in range(n_qwerky_layers) ]
+        qwerky_start = self.configMap.num_prefix_hybrid_layers
+        for i in range(n_qwerky_layers):
+            device = self.layers[qwerky_start + i].self_attn.q_proj.weight.data.device
 
             # Use the saved init_state if enabled
             # TODO: Consider letting the wkv_state dtype be a parameter
@@ -154,6 +176,7 @@ class Qwerky7Model(nn.Module):
         self, idx:torch.Tensor, 
         prv_stateList:list[torch.Tensor] = None,  
         ret_stateList:list[torch.Tensor] = None,
+        position_ids:torch.Tensor = None,
         overwrite_ret_tensor:bool=False
     ) -> tuple[torch.Tensor,list[torch.Tensor]]:
         '''
@@ -162,22 +185,19 @@ class Qwerky7Model(nn.Module):
 
         Returns a pair of the output embedding and the next state
         '''
-        # Prepare the state, with the batch size
-        if prv_stateList is None:
-            prv_stateList = self.get_init_state(idx.shape[0])
-
         # If no return state is set, let _forward_internal, set it up
         if ret_stateList is None:
-            ret_stateList = [ None for i in range(self.configMap.num_hidden_layers) ]
-            return self._forward_internal(idx, prv_stateList, ret_stateList, overwrite_ret_tensor=False)
+            ret_stateList = [ None for i in range(self.configMap.num_qwerky_layers()) ]
+            return self._forward_internal(idx, prv_stateList, ret_stateList, position_ids=position_ids, overwrite_ret_tensor=False)
 
         # Forward internally
-        return self._forward_internal(idx, prv_stateList, ret_stateList, overwrite_ret_tensor=overwrite_ret_tensor)
+        return self._forward_internal(idx, prv_stateList, ret_stateList, position_ids=position_ids, overwrite_ret_tensor=overwrite_ret_tensor)
     
     def _forward_internal_embeddings(
             self, x_hidden_state:torch.Tensor, 
             prv_stateList:list[torch.Tensor],  
             ret_stateList:list[torch.Tensor],
+            position_ids:torch.Tensor = None,
             overwrite_ret_tensor:bool=False
     ) -> tuple[torch.Tensor,list[torch.Tensor]]:
         '''
@@ -191,8 +211,26 @@ class Qwerky7Model(nn.Module):
         batch_size = x_hidden_state.shape[0]
         x_input_length = x_hidden_state.shape[1]
 
+        # Throw an error if prv_stateList is provided, with hybrid layers (prefix or suffix)
+        # as KV cache reuse is not implemented, and we will need the full index
+        if prv_stateList is not None and self.configMap.num_hybrid_layers() > 0:
+            raise NotImplementedError('prv_stateList KV cache reuse, for hybrid models, is not implemented for hybrid layers')
+        
+        # Prepare the state, with the batch size
+        if prv_stateList is None:
+            prv_stateList = self.get_init_state(batch_size)
+
+        # Generate position IDs if not provided
+        if position_ids is None:
+            position_ids = torch.arange(x_input_length, device=x_hidden_state.device)
+            position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
+
         # Initialize the v_first
         v_first = None
+
+        # Uses the input hidden state, as the v_first if v_first_embedding is enabled
+        if self.configMap.v_first_embedding:
+            v_first = x_hidden_state.clone()
 
         # Force overwrite_ret_tensor to False, if ret_stateList is None
         if ret_stateList is None:
@@ -202,28 +240,54 @@ class Qwerky7Model(nn.Module):
         forward_chunk_size = self.configMap.forward_chunk_size
         forward_chunk_count = math.ceil( x_input_length / forward_chunk_size )
 
-        # Iterate the layers, compute the x_hidden_state
-        for i, layer in enumerate(self.layers):
+        # Apply rotary embeddings to all layers
+        position_embeddings = self.rotary_emb(x_hidden_state, position_ids)
+
+        # Process prefix hybrid layers if any
+        if self.configMap.num_prefix_hybrid_layers > 0:
+            for i in range(self.configMap.num_prefix_hybrid_layers):
+                layer = self.layers[i]
+                x_hidden_state = x_hidden_state.to(layer.input_layernorm.weight.device, non_blocking=True)
+                x_hidden_state = layer(
+                    hidden_states=x_hidden_state,
+                    position_embeddings=position_embeddings,
+                    position_ids=position_ids,
+                    past_key_value=None,
+                    output_attentions=False,
+                    use_cache=False,
+                )[0]
+
+        # Process Qwerky layers
+        qwerky_start = self.configMap.num_prefix_hybrid_layers
+        qwerky_end = qwerky_start + self.configMap.num_qwerky_layers()
+        for i in range(qwerky_start, qwerky_end):
+            layer = self.layers[i]
+            qwerky_idx = i - qwerky_start
             
             # Single pass, optimized
             if forward_chunk_count <= 1:
-                x_hidden_state, last_layer_state, v_first = self._forward_layer_hook(layer, x_hidden_state, prv_stateList[i], v_first)
+                x_hidden_state, last_layer_state, v_first = self._forward_qwerky_layer_hook(
+                    layer, x_hidden_state, prv_stateList[qwerky_idx], v_first, 
+                    position_embeddings=position_embeddings
+                )
             else:
                 # Sadly, we need to chunk
                 new_x_hidden_state_arr = [None]*forward_chunk_count
                 v_first_arr = [None]*forward_chunk_count if v_first is None else None
-                last_layer_state = prv_stateList[i]
+                last_layer_state = prv_stateList[qwerky_idx]
 
                 # Iterate the chunks
                 for j in range(forward_chunk_count):
                     start = j * forward_chunk_size
                     endin = min( start + forward_chunk_size, x_input_length )
 
-                    new_x_hidden_state, last_layer_state, v_first_part = self._forward_layer_hook(
+                    new_x_hidden_state, last_layer_state, v_first_part = self._forward_qwerky_layer_hook(
                         layer, 
                         x_hidden_state[:,start:endin], 
                         last_layer_state, 
-                        v_first[:, start:endin] if v_first is not None else None
+                        v_first[:, start:endin] if v_first is not None else None,
+                        # Position embedding is a tuple pair of tensors, chunk it (tensor[B,T,C], tensor[B,T,C])
+                        position_embeddings=(position_embeddings[0][:, start:endin], position_embeddings[1][:, start:endin])
                     )
 
                     # Save the chunk
@@ -236,13 +300,26 @@ class Qwerky7Model(nn.Module):
                 if v_first_arr is not None:
                     v_first = torch.cat(v_first_arr, dim=1)
 
-            # last_layer_state = prv_stateList[i]
             # Overwrite tensor if needed
             if overwrite_ret_tensor:
-                ret_stateList[i][:] = last_layer_state
+                ret_stateList[qwerky_idx][:] = last_layer_state
             else:
-                ret_stateList[i] = last_layer_state
+                ret_stateList[qwerky_idx] = last_layer_state
                 
+        # Process suffix hybrid layers if any
+        if self.configMap.num_suffix_hybrid_layers > 0:
+            for i in range(qwerky_end, len(self.layers)):
+                layer = self.layers[i]
+                x_hidden_state = x_hidden_state.to(layer.input_layernorm.weight.device, non_blocking=True)
+                x_hidden_state = layer(
+                    hidden_states=x_hidden_state,
+                    position_embeddings=position_embeddings, # Used by layer's internal rotary_emb
+                    position_ids=position_ids,  # Used by layer's internal rotary_emb
+                    past_key_value=None,        # No KV cache support yet
+                    output_attentions=False,    # Match Qwerky behavior
+                    use_cache=False,            # No KV cache support yet
+                )[0]
+
         # Final layer norm, without the head
         x_hidden_state = x_hidden_state.to(self.norm.weight.device, non_blocking=True)
         x_hidden_state = self.norm(x_hidden_state)
@@ -250,23 +327,25 @@ class Qwerky7Model(nn.Module):
         # Return the output and the state list
         return x_hidden_state, ret_stateList
         
-    def _forward_layer_hook(self, 
+    def _forward_qwerky_layer_hook(self, 
             layer:Qwerky7LayerBlock, 
             x_hidden_state:torch.Tensor, 
             prv_stateList:list[torch.Tensor], 
-            v_first:torch.Tensor
+            v_first:torch.Tensor,
+            position_embeddings:torch.Tensor = None
     ) -> tuple[torch.Tensor,torch.Tensor,torch.Tensor]:
         '''
         Forward layer hook operation, that is easily overridable.
         To implement gradient checkpointing for use in various trainers
         '''
         x_hidden_state = x_hidden_state.to(layer.input_layernorm.weight.device, non_blocking=True)
-        return layer(x_hidden_state, prv_stateList, v_first)
+        return layer(x_hidden_state, prv_stateList, v_first, position_embeddings=position_embeddings)
     
     def _forward_internal(
         self, idx:torch.Tensor, 
         prv_stateList:list[torch.Tensor],  
         ret_stateList:list[torch.Tensor],
+        position_ids:torch.Tensor = None,
         overwrite_ret_tensor:bool=False
     ) -> tuple[torch.Tensor,list[torch.Tensor]]:
         '''
@@ -278,7 +357,7 @@ class Qwerky7Model(nn.Module):
         x_hidden_state = self.embed_tokens(idx)
 
         # Forward the layer layers
-        x_output_embedding, retStateList = self._forward_internal_embeddings(x_hidden_state, prv_stateList, ret_stateList, overwrite_ret_tensor)
+        x_output_embedding, retStateList = self._forward_internal_embeddings(x_hidden_state, prv_stateList, ret_stateList, position_ids, overwrite_ret_tensor)
 
         # Return the output and the state list
         return x_output_embedding, retStateList
@@ -288,6 +367,7 @@ class Qwerky7Model(nn.Module):
         self, idx:torch.Tensor, 
         prv_stateList:list[torch.Tensor],
         ret_stateList:list[torch.Tensor],
+        position_ids:torch.Tensor = None,
     ) -> tuple[torch.Tensor,list[torch.Tensor]]:
         '''
         Compiled varient of the forward function
@@ -295,14 +375,15 @@ class Qwerky7Model(nn.Module):
         Useful for static memory allocation optimizations inference
         '''
         # Forward internally
-        return self._forward_internal(idx, prv_stateList, ret_stateList, overwrite_ret_tensor=True)
+        return self._forward_internal(idx, prv_stateList, ret_stateList, position_ids, overwrite_ret_tensor=True)
   
     @torch.compile(mode="reduce-overhead")
     def forward_with_reduce_compile(
         self, in_idx:torch.Tensor, 
-        prv_stateList:list[torch.Tensor]
+        prv_stateList:list[torch.Tensor],
+        position_ids:torch.Tensor = None,
     ) -> tuple[torch.Tensor,list[torch.Tensor]]:
         '''
         Compiled varient of the forward function, requires previous state to be passed
         '''
-        return self._forward_internal(in_idx, prv_stateList, None, overwrite_ret_tensor=False)
+        return self._forward_internal(in_idx, prv_stateList, None, position_ids, overwrite_ret_tensor=False)

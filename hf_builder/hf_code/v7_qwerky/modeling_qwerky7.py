@@ -13,6 +13,7 @@ from transformers.utils import (
 from transformers.generation import GenerationMixin
 from transformers.modeling_outputs import ModelOutput, CausalLMOutputWithPast
 from transformers.cache_utils import Cache
+from transformers.models.qwen2.modeling_qwen2 import Qwen2DecoderLayer, Qwen2RMSNorm, Qwen2RotaryEmbedding
 
 import torch, math
 from torch import nn
@@ -300,8 +301,34 @@ class Qwerky7BaseModel(RwkvBlockQwerky7Model, Qwerky7PreTrainedModel):
         # Work around for multiple inheritance
         self.config = config
         super().__init__(config)
-        # Qwerky7GooseModel.__init__(self,config)
-        # Qwerky7PreTrainedModel.__init__(self,config)
+
+        # Add rotary embeddings for all layers
+        self.rotary_emb = Qwen2RotaryEmbedding(config=config.hybrid_layer_config())
+
+        # Setup pipeline parallel devices if specified
+        self.pipeline_parallel_devices = getattr(config, 'pipeline_parallel_devices', None)
+        if self.pipeline_parallel_devices:
+            # Validate devices
+            for device in self.pipeline_parallel_devices:
+                if not isinstance(device, str):
+                    raise ValueError(f"Pipeline parallel device must be string, got {type(device)}")
+            
+            num_devices = len(self.pipeline_parallel_devices)
+            # Count total layers including embeddings and final norm
+            total_layers = len(self.layers) + 2  # +2 for embeddings and final norm
+            layers_per_device = math.ceil(total_layers / num_devices)
+            
+            # Move embeddings to first device
+            self.embed_tokens = self.embed_tokens.to(self.pipeline_parallel_devices[0])
+            
+            # Move main layers
+            for i in range(len(self.layers)):
+                device_idx = (i + 1) // layers_per_device  # +1 because embeddings is first layer
+                device_idx = min(device_idx, num_devices - 1)  # Ensure we don't exceed device count
+                self.layers[i] = self.layers[i].to(self.pipeline_parallel_devices[device_idx])
+            
+            # Move final norm to last device
+            self.norm = self.norm.to(self.pipeline_parallel_devices[-1])
     
     def get_input_embeddings(self):
         return self.emb
@@ -326,7 +353,7 @@ class Qwerky7BaseModel(RwkvBlockQwerky7Model, Qwerky7PreTrainedModel):
         past_key_values: Optional[Cache] = None,
         qwerky_state: Optional[list[torch.Tensor]] = None,
         use_cache: Optional[bool] = None,
-        cache_position: Optional[torch.LongTensor] = None, # does nothing
+        cache_position: Optional[torch.LongTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -395,91 +422,133 @@ class Qwerky7BaseModel(RwkvBlockQwerky7Model, Qwerky7PreTrainedModel):
         # Initialize the ret_stateList
         ret_stateList = self.get_init_state(batch_size=batch_size, skip_init_state=True)
 
-        # ---
-        # This is useful for rotary embeddings
-        # ---
-       
-        # if cache_position is None:
-        #     past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-        #     cache_position = torch.arange(
-        #         past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
-        #     )
+        # Generate position IDs if not provided
+        if position_ids is None:
+            position_ids = torch.arange(x_input_length, device=x_hidden_state.device)
+            position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
 
-        # if position_ids is None:
-        #     position_ids = cache_position.unsqueeze(0)
+        # Initialize the v_first
+        v_first = None
 
-        # ---
+        # Uses the input hidden state, as the v_first if v_first_embedding is enabled
+        if self.config.v_first_embedding:
+            v_first = x_hidden_state.clone()
 
         # Get the forward chunk size, and the chunk count
         forward_chunk_size = self.config.forward_chunk_size
-        forward_chunk_count = math.ceil( x_input_length / forward_chunk_size )
+        forward_chunk_count = math.ceil(x_input_length / forward_chunk_size)
 
-        # Internal states
+        # Initialize internal states
         all_hidden_states = () if output_hidden_states else None
         all_attns = () if output_attentions else None
-        v_first = None
-        ret_sublist = None
-
-        # ---
 
         # Block forward, with gradient if needed
-        def layer_forward(layer, in_x_state, in_qwerky_state, in_v_first):
+        def qwerky_layer_forward(layer, in_x_state, in_qwerky_state, in_v_first, in_position_embeddings):
             if self.gradient_checkpointing and self.training:
                 return self._gradient_checkpointing_func(
-                    layer.__call__, in_x_state, in_qwerky_state, in_v_first
+                    layer.__call__, in_x_state, in_qwerky_state, in_v_first, position_embeddings=in_position_embeddings
                 )
             else:
-                return layer(in_x_state, in_qwerky_state, in_v_first)
+                return layer(in_x_state, in_qwerky_state, in_v_first, position_embeddings=in_position_embeddings)
         
-        # Lets start iterating the layers
-        # ----------------------------------------------------------------------------
-        for i, layer in enumerate(self.layers):
-            # Build the full inner hidden state
-            if output_hidden_states:
-                all_hidden_states += (x_hidden_state,)
+        # Generate rotary embeddings for all layers
+        position_embeddings = self.rotary_emb(x_hidden_state, position_ids)
 
-            # Forward the layer as it is
-            # ---
+        # Process prefix hybrid layers if any
+        if self.config.num_prefix_hybrid_layers > 0:
+            for i in range(self.config.num_prefix_hybrid_layers):
+                layer = self.layers[i]
+                x_hidden_state = x_hidden_state.to(layer.input_layernorm.weight.device, non_blocking=True)
+                x_hidden_state = layer(
+                    hidden_states=x_hidden_state,
+                    position_embeddings=position_embeddings,
+                    position_ids=position_ids,
+                    past_key_value=None,
+                    output_attentions=False,
+                    use_cache=False,
+                )[0]
+
+                if output_hidden_states:
+                    all_hidden_states += (x_hidden_state,)
+
+        # Process Qwerky layers
+        qwerky_start = self.config.num_prefix_hybrid_layers
+        qwerky_end = qwerky_start + (self.config.num_hidden_layers - self.config.num_suffix_hybrid_layers - self.config.num_prefix_hybrid_layers)
+        for i in range(qwerky_start, qwerky_end):
+            layer = self.layers[i]
+            
+            # Move tensors to layer's device
+            if self.pipeline_parallel_devices:
+                layer_device = layer.input_layernorm.weight.device
+                x_hidden_state = x_hidden_state.to(layer_device, non_blocking=True)
+                if v_first is not None:
+                    v_first = v_first.to(layer_device, non_blocking=True)
+                if isinstance(position_embeddings, tuple):
+                    position_embeddings = (position_embeddings[0].to(layer_device, non_blocking=True),
+                                        position_embeddings[1].to(layer_device, non_blocking=True))
+            
+            qwerky_idx = i - qwerky_start
+            if self.pipeline_parallel_devices and prv_stateList[qwerky_idx] is not None:
+                prv_stateList[qwerky_idx] = prv_stateList[qwerky_idx].to(layer_device, non_blocking=True)
+
+            # Single pass, optimized  
             if forward_chunk_count <= 1:
-                x_hidden_state, ret_sublist, v_first = layer_forward(layer, x_hidden_state, prv_stateList[i], v_first)
-                ret_stateList[i] = ret_sublist
+                x_hidden_state, ret_subList, v_first = qwerky_layer_forward(layer, x_hidden_state, prv_stateList[qwerky_idx], v_first, position_embeddings)
+                ret_stateList[qwerky_idx] = ret_subList
             else:
-                # Damn it, we need to chunk
+                # Chunk processing
                 new_x_hidden_state_arr = [None]*forward_chunk_count
                 v_first_arr = [None]*forward_chunk_count if v_first is None else None
-                ret_subList = prv_stateList[i]
-
+                qwerky_idx = i - qwerky_start
+                ret_subList = prv_stateList[qwerky_idx]
+                
                 # Forward in chunks
                 for chunk_idx in range(forward_chunk_count):
                     start = chunk_idx * forward_chunk_size
                     endin = min(start + forward_chunk_size, x_input_length)
 
-                    new_x_hidden_state, ret_subList, v_first_part = layer_forward(
+                    new_x_hidden_state, ret_subList, v_first_part = qwerky_layer_forward(
                         layer, 
                         x_hidden_state[:, start:endin], 
                         ret_subList, 
-                        v_first[:, start:endin] if v_first is not None else None
+                        v_first[:, start:endin] if v_first is not None else None,
+                        # Position embedding is a tuple pair of tensors, chunk it (tensor[B,T,C], tensor[B,T,C])
+                        position_embeddings=(position_embeddings[0][:, start:endin], position_embeddings[1][:, start:endin])
                     )
 
                     new_x_hidden_state_arr[chunk_idx] = new_x_hidden_state
                     if v_first_arr is not None:
                         v_first_arr[chunk_idx] = v_first_part
 
-                # Merge the forward chunks, save the state
+                # Merge the chunks
                 x_hidden_state = torch.cat(new_x_hidden_state_arr, dim=1)
                 if v_first_arr is not None:
                     v_first = torch.cat(v_first_arr, dim=1)
-                ret_stateList[i] = ret_subList
-            # ---
+                ret_stateList[qwerky_idx] = ret_subList
 
             # Save the state to cache if needed
             if past_key_values is not None and use_cache:
-                past_key_values.update(ret_stateList[i], x_input_length, i)
+                past_key_values.update(ret_stateList[qwerky_idx], x_input_length, qwerky_idx)
 
-            # if output_attentions:
-            #     all_attns += (ret_sublist,)
+            if output_hidden_states:
+                all_hidden_states += (x_hidden_state,)
 
-        # ----------------------------------------------------------------------------
+        # Process suffix hybrid layers if any
+        if self.config.num_suffix_hybrid_layers > 0:
+            for i in range(qwerky_end, len(self.layers)):
+                layer = self.layers[i]
+                x_hidden_state = x_hidden_state.to(layer.input_layernorm.weight.device, non_blocking=True)
+                x_hidden_state = layer(
+                    hidden_states=x_hidden_state,
+                    position_embeddings=position_embeddings,
+                    position_ids=position_ids,
+                    past_key_value=None,  # No KV cache support yet
+                    output_attentions=False,
+                    use_cache=False,  # No KV cache support yet
+                )[0]
+
+                if output_hidden_states:
+                    all_hidden_states += (x_hidden_state,)
 
         # Final layer norm
         x_hidden_state = x_hidden_state.to(self.norm.weight.device, non_blocking=True)
@@ -513,7 +582,7 @@ class Qwerky7ForCausalLM(Qwerky7PreTrainedModel, GenerationMixin):
         self.model = Qwerky7BaseModel(config)
 
         dtype=self.model.embed_tokens.weight.dtype
-        device=self.model.embed_tokens.weight.device
+        device=self.model.norm.weight.device
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False, dtype=dtype, device=device)
 
         self.post_init()

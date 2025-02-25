@@ -22,6 +22,8 @@ class Qwerky7TimeMix(torch.nn.Module):
 
         # Get required props
         hidden_size = configMap.hidden_size
+        v_first_embedding = configMap.v_first_embedding
+        self.v_first_embedding = v_first_embedding
         # num_hidden_layers = configMap.num_hidden_layers
 
         # Get the layer id
@@ -87,7 +89,7 @@ class Qwerky7TimeMix(torch.nn.Module):
             self.a1 = nn.Parameter(torch.empty(hidden_size,D_AAA_LORA, device=device, dtype=dtype))
             self.a2 = nn.Parameter(torch.empty(D_AAA_LORA,hidden_size, device=device, dtype=dtype))
             
-            if layer_id > 0:
+            if layer_id > 0 or self.v_first_embedding:
                 self.v0 = nn.Parameter(torch.empty(1,1,hidden_size, device=device, dtype=dtype))
                 self.v1 = nn.Parameter(torch.empty(hidden_size,D_MV_LORA, device=device, dtype=dtype))
                 self.v2 = nn.Parameter(torch.empty(D_MV_LORA,hidden_size, device=device, dtype=dtype))
@@ -130,7 +132,7 @@ class Qwerky7TimeMix(torch.nn.Module):
 
         # Reset the various params
         # ---
-        with torch.no_grad():
+        with torch.device(device), torch.no_grad():
             ratio_0_to_1 = layer_id / (num_hidden_layers - 1)  # 0 to 1
             ratio_1_to_almost0 = 1.0 - (layer_id / num_hidden_layers)  # 1 to ~0
             ddd = torch.ones(1, 1, hidden_size, device=device, dtype=dtype)
@@ -181,7 +183,7 @@ class Qwerky7TimeMix(torch.nn.Module):
             self.a2.copy_(ortho_init(torch.zeros(D_AAA_LORA, hidden_size), 0.1))
 
             # D_MV_LORA = max(32, int(round(  (1.3*(hidden_size**0.5))  /32)*32)) # suggestion
-            if layer_id > 0:
+            if layer_id > 0 or self.v_first_embedding:
                 self.v0.copy_(torch.zeros(1,1,hidden_size, device=device, dtype=dtype)+1.0)
                 self.v1.copy_(torch.zeros(hidden_size, D_MV_LORA, device=device, dtype=dtype))
                 self.v2.copy_(ortho_init(torch.zeros(D_MV_LORA, hidden_size), 0.1))
@@ -233,7 +235,7 @@ class Qwerky7TimeMix(torch.nn.Module):
 
         # Ensure wkv_state_in is initialized
         if wkv_state_in is None:
-            wkv_state_in = torch.zeros(BATCH_SIZE,N_HEAD,HEAD_SIZE,HEAD_SIZE, dtype=torch.float,device=w.device)
+            wkv_state_in = torch.zeros(BATCH_SIZE,N_HEAD,HEAD_SIZE,HEAD_SIZE, dtype=torch.float, device=self.w0.device)
         else:
             wkv_state_in = wkv_state_in.clone()
 
@@ -262,7 +264,7 @@ class Qwerky7TimeMix(torch.nn.Module):
         # xg = x + dxprev * self.x_g
         # xx = dxprev
 
-        xr = xw = xk = xv = xa = xg = x.to(self.q_proj.weight.dtype)
+        xr = xw = xk = xv = xa = xg = x.to(self.q_proj.weight.device)
 
         r = self.q_proj(xr)
         w_lora_result = self.w0 + (torch.tanh(xw @ self.w1) @ self.w2).float()
@@ -309,7 +311,7 @@ class Qwerky7TimeMix(torch.nn.Module):
         ##########
         # x070
         ##########
-        if self.layer_id == 0 or v_first_val is None:
+        if v_first_val is None:
             v_first_val = v # store the v of the first layer
         else:
             v = v + (v_first_val - v) * torch.sigmoid(self.v0 + (xv @ self.v1) @ self.v2) # add value residual
@@ -333,23 +335,27 @@ class Qwerky7TimeMix(torch.nn.Module):
         # if tmix_backend == "cuda" and HEAD_SIZE != 64:
         #     print(f"[WARNING] !!! CUDA backend has potential memory safety issues for qwerky for non-64 head sizes !!!")
 
+        # Contigous safety
+        xi = torch.zeros_like(x, device=x.device, dtype=x.dtype).contiguous() 
+        xi, r, k, v, kk, iclr = [i.bfloat16().contiguous() for i in [xi, r, k, v, kk, iclr]]
+        w_lora_result, wkv_state_in = [i.float().contiguous() for i in [w_lora_result, wkv_state_in]]
+
         # Apply the time mix backend
-        xx = torch.empty_like(x, device=x.device, dtype=x.dtype)
-        xx, wkv_state_out = _run_tmix_backend(tmix_backend, r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xx, wkv_state_in)
+        xx, wkv_state_out = _run_tmix_backend(tmix_backend, r, w_lora_result, k, v, kk, iclr, BATCH_SIZE, SEQ_LEN, N_HEAD, HEAD_SIZE, xi, wkv_state_in)
         ##########
 
-        xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
-        # xx = torch.nn.functional.group_norm(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE).float(), num_groups=N_HEAD, weight=self.ln_x.weight.float(), bias=self.ln_x.bias.float(), eps = self.ln_x.eps).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE).to(dtype=x_dtype)
+        # xx = self.ln_x(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE)).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE)
+        xn = torch.nn.functional.group_norm(xx.view(BATCH_SIZE * SEQ_LEN, IN_EMB_SIZE).float(), num_groups=N_HEAD, weight=self.ln_x.weight.float(), bias=self.ln_x.bias.float(), eps = self.ln_x.eps).view(BATCH_SIZE, SEQ_LEN, IN_EMB_SIZE).to(dtype=x_dtype)
 
         # ---
         # Intentionally removed for qwerky7
         # ---
         # xx = xx + ((r.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*k.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)*self.r_k).sum(dim=-1, keepdim=True) * v.view(BATCH_SIZE,SEQ_LEN,N_HEAD,-1)).view(BATCH_SIZE,SEQ_LEN,IN_EMB_SIZE)
         
-        xx = self.o_proj(xx * g).to(dtype=x_dtype)
+        xo = self.o_proj(xn * g).to(dtype=x_dtype)
 
         # Return the results
-        return xx, wkv_state_out, v_first_val
+        return xo, wkv_state_out, v_first_val
     
     @torch.compile(mode="default")
     def forward_with_default_compile(self, in_x:Tensor, wkv_state_in:Tensor, v_first_val_in:Tensor, out_x:Tensor, wkv_state_out:Tensor, v_first_val_out:Tensor, position_embeddings: Tuple[torch.Tensor, torch.Tensor]=None) -> tuple[Tensor,Tensor,Tensor]:

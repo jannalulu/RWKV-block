@@ -1,6 +1,7 @@
 """ RWKV configuration"""
 
 from transformers.configuration_utils import PretrainedConfig
+from transformers.models.qwen2.configuration_qwen2 import Qwen2Config
 # from transformers.utils import logging
 # logger = logging.get_logger(__name__)
 
@@ -24,6 +25,9 @@ class Qwerky7Config(PretrainedConfig):
             Number of hidden layers in the model.
         hidden_size (`int`, *optional*, defaults to 768):
             Dimensionality of the embeddings and hidden states.
+        pipeline_parallel_devices (`List[str]`, *optional*):
+            List of devices for pipeline parallel execution. Each device string should be in the format "cuda:N".
+            When provided, the model layers will be distributed across these devices.
         
         hidden_size_att (`int`, *optional*):
             Dimensionality of the attention hidden states. Will be computed from `hidden_size` if unset.
@@ -39,6 +43,21 @@ class Qwerky7Config(PretrainedConfig):
         forward_chunk_size (`int`, *optional*, defaults to 4096):
             Chunk size for the forward pass. Used to break large inputs into smaller chunks to avoid OOM errors.
             
+        num_prefix_hybrid_layers (`int`, *optional*, defaults to 0):
+            Number of Qwen2 transformer layers to use at the start of the model.
+        num_suffix_hybrid_layers (`int`, *optional*, defaults to 0):
+            Number of Qwen2 transformer layers to use at the end of the model.
+        hybrid_num_attention_heads (`int`, *optional*, defaults to 0):
+            Number of attention heads for Qwen2 layers.
+        hybrid_num_key_value_heads (`int`, *optional*, defaults to 0):
+            Number of key/value heads for Qwen2 layers.
+        hybrid_attention_dropout (`float`, *optional*, defaults to 0.0):
+            Dropout probability for attention weights in Qwen2 layers.
+        rope_theta (`float`, *optional*, defaults to 1000000.0):
+            Base period for rotary position embeddings in Qwen2 layers.
+        max_position_embeddings (`int`, *optional*, defaults to 32768):
+            Maximum sequence length supported by position embeddings.
+
         device (`str`, *optional*):
             Device to use for the model. Use the respective torch.device types
         dtype (`str`, *optional*):
@@ -91,17 +110,27 @@ class Qwerky7Config(PretrainedConfig):
         dropout_rate=0.0,
         # Internal forward chunk size
         forward_chunk_size=4096,
-        # # Torch device and dtype
-        # device=None,
-        # dtype=None,
+        # V First embedding support
+        v_first_embedding=False,
+        ########################################
+        # Hybrid model configuration
+        ########################################
+        num_prefix_hybrid_layers=0,
+        num_suffix_hybrid_layers=0,
+        hybrid_num_attention_heads=0,
+        hybrid_num_key_value_heads=0,
+        hybrid_attention_dropout=0.0,
+        rope_theta=1000000.0,
+        max_position_embeddings=32768,
         ########################################
         # HF specific configuration
         ########################################
-        use_cache=True,
+        use_cache=False,
         bos_token_id=0,
         eos_token_id=0,
         tie_word_embeddings=False,
         use_bfloat16=True,
+        pipeline_parallel_devices=None,
         ########################################
         **kwargs,
     ):
@@ -114,17 +143,26 @@ class Qwerky7Config(PretrainedConfig):
         self.hidden_size = hidden_size
         self.hidden_size_att = hidden_size_att
         self.hidden_size_ffn = hidden_size_ffn
+        self.v_first_embedding = v_first_embedding
 
         self.head_size = head_size
         self.tmix_backend = tmix_backend
         self.init_state_wkv = init_state_wkv
+        self.v_first_embedding = v_first_embedding
         self.forward_chunk_size = forward_chunk_size
-
-        # self.device = device
-        # self.dtype = dtype
 
         self.dropout_rate = dropout_rate
         self.use_cache = use_cache
+        self.pipeline_parallel_devices = pipeline_parallel_devices
+
+        # Hybrid model configuration
+        self.num_prefix_hybrid_layers = num_prefix_hybrid_layers
+        self.num_suffix_hybrid_layers = num_suffix_hybrid_layers
+        self.hybrid_num_attention_heads = hybrid_num_attention_heads
+        self.hybrid_num_key_value_heads = hybrid_num_key_value_heads
+        self.hybrid_attention_dropout = hybrid_attention_dropout
+        self.rope_theta = rope_theta
+        self.max_position_embeddings = max_position_embeddings
         
         # Forward to the HF PretrainedConfig
         super().__init__(
@@ -137,15 +175,14 @@ class Qwerky7Config(PretrainedConfig):
 
     @staticmethod
     def from_model_state_dict(state_dict: dict, **kwargs):
-        base_config = RwkvBlockQwerky7ConfigMap.from_model_state_dict(state_dict)
-        # Join dictionary with **goose_config.__dict__ and **kwargs
+        base_config = RwkvBlockQwerky7ConfigMap.from_model_state_dict(state_dict, **kwargs)
+        # Join dictionary with base config and kwargs
         return Qwerky7Config(**{**base_config.__dict__, **kwargs})
     
     def new_block_config_map(self, **kwargs) -> 'Qwerky7BlockConfigMap':
         '''
         Returns a new config map with updated values
         '''
-
         new_dict = {}
         for key in Qwerky7BlockConfigMap.__dataclass_fields__:
             if key in self.__dict__:
@@ -153,3 +190,32 @@ class Qwerky7Config(PretrainedConfig):
         new_dict.update(kwargs)
 
         return Qwerky7BlockConfigMap(**new_dict)
+
+    def hybrid_layer_config(self) -> Qwen2Config:
+        '''
+        Returns the Qwen2 configuration for hybrid layers
+        '''
+        return Qwen2Config(
+            vocab_size=self.vocab_size,
+            hidden_size=self.hidden_size,
+            intermediate_size=self.hidden_size_ffn or 4 * self.hidden_size,
+            num_hidden_layers=self.num_hidden_layers,
+            num_attention_heads=self.hybrid_num_attention_heads,
+            num_key_value_heads=self.hybrid_num_key_value_heads,
+            max_position_embeddings=self.max_position_embeddings,
+            attention_dropout=self.hybrid_attention_dropout,
+            rope_theta=self.rope_theta,
+            use_cache=self.use_cache,
+        )
+
+    def num_qwerky_layers(self) -> int:
+        """
+        Returns the number of qwerky layers in the model
+        """
+        return self.num_hidden_layers - self.num_suffix_hybrid_layers - self.num_prefix_hybrid_layers
+
+    def num_hybrid_layers(self) -> int:
+        """
+        Returns the total number of hybrid layers in the model
+        """
+        return self.num_suffix_hybrid_layers + self.num_prefix_hybrid_layers
